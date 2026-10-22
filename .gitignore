@@ -1,0 +1,8 @@
+/target/
+node_modules/
+dist/
+.DS_Store
+
+# AI Generated files
+CLAUDE.md
+*_PLAN.md
