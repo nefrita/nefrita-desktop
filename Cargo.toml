@@ -1,0 +1,9 @@
+[workspace]
+members = ["crates/nefrita-device"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+repository = "https://github.com/nefrita/nefrita-desktop"
