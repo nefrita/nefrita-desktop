@@ -1,0 +1,9 @@
+[package]
+name = "nefrita-device"
+version = "0.1.0"
+description = "Client for the Nefrita hardware wallet over USB serial and TCP"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true

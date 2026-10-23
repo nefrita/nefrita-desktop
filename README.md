@@ -18,6 +18,10 @@ The app is built with Rust, Tauri and React with TypeScript.
 - [Nefrita firmware](https://github.com/Sharmaz/Jade), based on [Blockstream Jade](https://github.com/Blockstream/Jade). Nefrita is not affiliated with Blockstream.
 - [The Nefrita organization](https://github.com/nefrita).
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
 [MIT](LICENSE).
