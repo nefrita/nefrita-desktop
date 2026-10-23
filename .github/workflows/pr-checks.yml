@@ -16,9 +16,6 @@ defaults:
   run:
     shell: bash
 
-env:
-  CARGO_DENY_VERSION: 0.20.2
-
 jobs:
   format:
     runs-on: ubuntu-latest
@@ -59,6 +56,8 @@ jobs:
   dependencies:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      CARGO_DENY_VERSION: 0.20.2
     steps:
       - uses: actions/checkout@v7
 
@@ -78,3 +77,65 @@ jobs:
 
       - name: Check advisories, licenses, bans and sources
         run: cargo deny --locked check
+
+  device-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      FIRMWARE_REPOSITORY: Sharmaz/Jade
+      FIRMWARE_COMMIT: e18deffd96fb293730a51c9874c73ab4ca6e841a
+      JADE_BUILDER_IMAGE: blockstream/jade_builder@sha256:cbf0aabee7513dc8cad8f1d69a5e00f5b73bcd0965a44254627c0de4bfc8c4f2
+      LIBJADE_PORT: 30121
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check out the firmware
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.FIRMWARE_REPOSITORY }}
+          ref: ${{ env.FIRMWARE_COMMIT }}
+          path: firmware
+          submodules: recursive
+
+      - name: Log in to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: echo "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
+
+      - name: Restore libjade_daemon
+        id: libjade-daemon-cache
+        uses: actions/cache@v6
+        with:
+          path: firmware/build_linux/libjade/libjade_daemon
+          key: libjade-daemon-xbt-${{ env.FIRMWARE_COMMIT }}
+
+      - name: Build libjade_daemon with XBT
+        if: steps.libjade-daemon-cache.outputs.cache-hit != 'true'
+        run: |
+          docker run --rm --volume "$PWD/firmware":/host/jade --workdir /host/jade \
+            "$JADE_BUILDER_IMAGE" bash -c '
+            git config --global --add safe.directory /host/jade &&
+            pushd /opt/esp/idf >/dev/null && . ./export.sh >/dev/null && popd >/dev/null &&
+            ./tools/switch_to.sh jade --dev --noradio &&
+            ./libjade/make_libjade.sh Debug --xbt'
+
+      - name: Start libjade_daemon
+        run: |
+          docker run --detach --name libjade-daemon --publish "$LIBJADE_PORT:$LIBJADE_PORT" \
+            --volume "$PWD/firmware/build_linux/libjade":/libjade \
+            "$JADE_BUILDER_IMAGE" /libjade/libjade_daemon --tcp "$LIBJADE_PORT"
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Run the integration tests
+        env:
+          NEFRITA_LIBJADE_ADDRESS: 127.0.0.1:${{ env.LIBJADE_PORT }}
+        run: |
+          cargo test --package nefrita-device --test libjade --locked \
+            -- --ignored --test-threads=1
+
+      - name: Show the libjade_daemon output
+        if: failure()
+        run: docker logs libjade-daemon
