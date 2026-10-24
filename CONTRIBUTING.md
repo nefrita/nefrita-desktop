@@ -6,6 +6,10 @@
 - To bring a branch up to date with `main`, rebase it locally and push it with `git push --force-with-lease`, or use "Update branch" on the pull request.
 - Run the local checks below before opening or updating a pull request.
 
+## Code layout
+
+Each domain of a crate lives in its own folder, with a `mod.rs` that declares its modules and what they export. The unit tests of a module go in their own `tests.rs`: `message.rs` declares `#[cfg(test)] mod tests;`, and its tests live in `message/tests.rs`. A file, code or tests, should stay around 300 lines at most; when one gets close, look for a second responsibility and move it to its own file.
+
 ## Local checks
 
 The Rust version is pinned in `rust-toolchain.toml`. Install it once, and again whenever that file changes:
