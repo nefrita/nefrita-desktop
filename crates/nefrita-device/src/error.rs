@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 
-use crate::message::ErrorReply;
+use crate::protocol::ErrorReply;
 
 #[derive(Debug)]
 pub enum DeviceError {
