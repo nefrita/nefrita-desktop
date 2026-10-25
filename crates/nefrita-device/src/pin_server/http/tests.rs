@@ -9,8 +9,8 @@ use crate::pin_server::test_server::{
     start_https_server,
 };
 
-const DEVICE_MESSAGE: &str = "device message";
-const SERVER_REPLY: &str = "server reply";
+const ENCRYPTED_DEVICE_MESSAGE: &str = "device message";
+const ENCRYPTED_SERVER_REPLY: &str = "server reply";
 const OWN_AUTHORITY_NAME: &str = "Nefrita test authority";
 const OTHER_AUTHORITY_NAME: &str = "Other test authority";
 
@@ -25,14 +25,14 @@ fn pin_server_request(pin_server_url: String, root_certificates: Vec<String>) ->
         urls: vec![pin_server_url],
         root_certificates,
         device_payload: PinServerPayload {
-            encrypted_message: DEVICE_MESSAGE.to_owned(),
+            encrypted_message: ENCRYPTED_DEVICE_MESSAGE.to_owned(),
         },
     }
 }
 
 fn server_reply_payload() -> PinServerPayload {
     PinServerPayload {
-        encrypted_message: SERVER_REPLY.to_owned(),
+        encrypted_message: ENCRYPTED_SERVER_REPLY.to_owned(),
     }
 }
 
@@ -88,7 +88,10 @@ fn payload_is_posted_as_json_and_the_reply_is_returned() {
     assert!(!lowercase_request_head.contains("user-agent"));
     let posted_payload: serde_json::Value = serde_json::from_slice(&captured_request.request_body)
         .expect("the posted body should be JSON");
-    assert_eq!(posted_payload, serde_json::json!({"data": DEVICE_MESSAGE}));
+    assert_eq!(
+        posted_payload,
+        serde_json::json!({"data": ENCRYPTED_DEVICE_MESSAGE})
+    );
 }
 
 #[test]
