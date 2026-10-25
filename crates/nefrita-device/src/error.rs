@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 
+use crate::pin_server::PinServerError;
 use crate::protocol::ErrorReply;
 
 #[derive(Debug)]
@@ -15,6 +16,9 @@ pub enum DeviceError {
     ReplyWithoutResult,
     Rejected(ErrorReply),
     NotXbtFirmware { chain: Option<String> },
+    RequestNotConfirmed { method_name: String },
+    PinServerFailed(PinServerError),
+    UnsupportedPinServerRequest(String),
 }
 
 impl fmt::Display for DeviceError {
@@ -67,6 +71,19 @@ impl fmt::Display for DeviceError {
                     "the device firmware is not XBT: it reports no chain"
                 )
             }
+            Self::RequestNotConfirmed { method_name } => {
+                write!(formatter, "the device did not confirm {method_name}")
+            }
+            Self::PinServerFailed(pin_server_error) => {
+                write!(
+                    formatter,
+                    "the PIN server exchange failed: {pin_server_error}"
+                )
+            }
+            Self::UnsupportedPinServerRequest(request_description) => write!(
+                formatter,
+                "the device asked for an unsupported PIN server request: {request_description}"
+            ),
         }
     }
 }
@@ -74,8 +91,12 @@ impl fmt::Display for DeviceError {
 impl Error for DeviceError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::ConnectionFailed(connection_error) => Some(connection_error),
+            Self::ConnectionFailed(connection_error) => connection_error.source(),
+            Self::PinServerFailed(pin_server_error) => pin_server_error.source(),
             _ => None,
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
