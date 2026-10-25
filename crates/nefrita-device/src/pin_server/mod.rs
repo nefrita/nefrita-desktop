@@ -2,6 +2,8 @@ mod certificates;
 mod error;
 mod http;
 #[cfg(test)]
+pub(crate) mod scripted;
+#[cfg(test)]
 mod test_certificates;
 #[cfg(test)]
 mod test_server;

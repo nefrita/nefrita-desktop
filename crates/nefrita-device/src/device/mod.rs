@@ -1,5 +1,7 @@
+mod custom_pin_server;
 #[cfg(test)]
 mod scripted;
+mod unlock;
 mod version_information;
 
 use serde::Serialize;
@@ -9,6 +11,8 @@ use crate::connection::DeviceConnection;
 use crate::error::DeviceError;
 use crate::protocol::{self, MessageReader};
 
+pub use custom_pin_server::CustomPinServer;
+pub use unlock::UnlockOutcome;
 pub use version_information::{DeviceState, VersionInformation};
 
 pub struct Device<Connection> {
@@ -31,6 +35,31 @@ impl<Connection: DeviceConnection> Device<Connection> {
         method_name: &str,
         parameters: Option<&Parameters>,
     ) -> Result<MethodResult, DeviceError> {
+        let request_identifier = self.write_request(method_name, parameters)?;
+        self.message_reader
+            .read_reply(&mut self.connection, &request_identifier)
+    }
+
+    fn send_request_requiring_confirmation<Parameters: Serialize>(
+        &mut self,
+        method_name: &str,
+        parameters: Option<&Parameters>,
+    ) -> Result<(), DeviceError> {
+        let device_confirmed: bool = self.send_request(method_name, parameters)?;
+        if device_confirmed {
+            Ok(())
+        } else {
+            Err(DeviceError::RequestNotConfirmed {
+                method_name: method_name.to_owned(),
+            })
+        }
+    }
+
+    fn write_request<Parameters: Serialize>(
+        &mut self,
+        method_name: &str,
+        parameters: Option<&Parameters>,
+    ) -> Result<String, DeviceError> {
         let request_identifier = self.next_request_identifier();
         let encoded_request =
             protocol::encode_request(&request_identifier, method_name, parameters)?;
@@ -38,8 +67,7 @@ impl<Connection: DeviceConnection> Device<Connection> {
             .write_all(&encoded_request)
             .and_then(|()| self.connection.flush())
             .map_err(DeviceError::ConnectionFailed)?;
-        self.message_reader
-            .read_reply(&mut self.connection, &request_identifier)
+        Ok(request_identifier)
     }
 
     fn next_request_identifier(&mut self) -> String {
