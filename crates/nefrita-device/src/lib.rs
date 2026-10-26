@@ -5,6 +5,8 @@ mod pin_server;
 mod protocol;
 
 pub use connection::DeviceConnection;
+#[cfg(feature = "debug-methods")]
+pub use device::DebugWalletKind;
 pub use device::{CustomPinServer, Device, DeviceState, UnlockOutcome, VersionInformation};
 pub use error::DeviceError;
 pub use pin_server::{

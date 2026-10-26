@@ -1,4 +1,6 @@
 mod custom_pin_server;
+#[cfg(feature = "debug-methods")]
+mod debug_methods;
 #[cfg(test)]
 mod scripted;
 mod unlock;
@@ -12,6 +14,8 @@ use crate::error::DeviceError;
 use crate::protocol::{self, MessageReader};
 
 pub use custom_pin_server::CustomPinServer;
+#[cfg(feature = "debug-methods")]
+pub use debug_methods::DebugWalletKind;
 pub use unlock::UnlockOutcome;
 pub use version_information::{DeviceState, VersionInformation};
 
