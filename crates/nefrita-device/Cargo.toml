@@ -21,3 +21,7 @@ serde_json = "1.0.154"
 
 [features]
 debug-methods = []
+
+[[test]]
+name = "libjade"
+required-features = ["debug-methods"]
