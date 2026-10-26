@@ -38,15 +38,28 @@ cargo deny --locked check
 
 `cargo install` only builds cargo-deny the first time; afterwards it reports that the version is already installed. When the workflow changes the cargo-deny version, update it here too.
 
+`cargo deny` only checks the platforms listed under `[graph] targets` in `deny.toml`: the six desktop targets the app is released for (Linux, macOS and Windows, on x86_64 and ARM64). Update that list together with the release builds.
+
 ## Integration tests
 
-The integration tests of `nefrita-device` talk to `libjade_daemon`: the Nefrita firmware compiled for a computer, built with XBT, listening on a TCP port. `cargo test` skips them. To run them locally you need Docker; the firmware commit and the builder image are the same as in the `device-integration` job:
+The integration tests of `nefrita-device` talk to `libjade_daemon`, the Nefrita firmware compiled for a computer, built with XBT and listening on a TCP port. They also talk to two PIN servers: the development server, with the test key pair of the firmware repository, at `http://localhost:8096`, the address compiled into XBT development builds; and a custom server, with its own key pair, at `http://localhost:8097`.
+
+The tests use the debug methods of the device, so they need the `debug-methods` feature: plain `cargo test` does not build them, and `cargo test --all-features` lists them as ignored. To run them locally you need Docker; the firmware commit and the builder image are the same as in the `device-integration` job.
+
+Set these variables from the root of the repository, in the same shell as the next two blocks, and again in every new shell:
 
 ```bash
 firmware_commit=e18deffd96fb293730a51c9874c73ab4ca6e841a
 jade_builder_image=blockstream/jade_builder@sha256:cbf0aabee7513dc8cad8f1d69a5e00f5b73bcd0965a44254627c0de4bfc8c4f2
 firmware_directory="$PWD/target/firmware"
-git clone https://github.com/Sharmaz/Jade.git "$firmware_directory"
+custom_pin_server_key_directory="$PWD/target/custom-pin-server"
+```
+
+Prepare the firmware, `libjade_daemon`, the PIN server image and the key pair of the custom PIN server:
+
+```bash
+[ -d "$firmware_directory" ] || git clone https://github.com/Sharmaz/Jade.git "$firmware_directory"
+git -C "$firmware_directory" fetch origin
 git -C "$firmware_directory" checkout "$firmware_commit"
 git -C "$firmware_directory" submodule update --init --recursive
 docker run --rm --platform linux/amd64 --volume "$firmware_directory":/host/jade --workdir /host/jade \
@@ -55,16 +68,46 @@ docker run --rm --platform linux/amd64 --volume "$firmware_directory":/host/jade
   pushd /opt/esp/idf >/dev/null && . ./export.sh >/dev/null && popd >/dev/null &&
   ./tools/switch_to.sh jade --dev --noradio &&
   ./libjade/make_libjade.sh Debug --xbt'
+docker build --platform linux/amd64 --tag pin-server "$firmware_directory/pinserver"
+mkdir -p "$custom_pin_server_key_directory"
+docker run --rm --platform linux/amd64 --volume "$custom_pin_server_key_directory":/keys \
+  --workdir /keys --env PYTHONPATH=/ pin-server python3 -m pinserver.generateserverkey
+```
+
+Then start the two PIN servers and `libjade_daemon`, run the tests and stop them:
+
+```bash
+docker run --rm --detach --name development-pin-server --platform linux/amd64 \
+  --publish 8096:8096 --tmpfs /pins \
+  --volume "$firmware_directory/server_private_key.key":/server_private_key.key:ro \
+  pin-server
+docker run --rm --detach --name custom-pin-server --platform linux/amd64 \
+  --publish 8097:8096 --tmpfs /pins \
+  --volume "$custom_pin_server_key_directory/server_private_key.key":/server_private_key.key:ro \
+  pin-server
 docker run --rm --detach --name libjade-daemon --platform linux/amd64 --publish 30121:30121 \
   --volume "$firmware_directory/build_linux/libjade":/libjade \
   "$jade_builder_image" /libjade/libjade_daemon --tcp 30121
-NEFRITA_LIBJADE_ADDRESS=127.0.0.1:30121 cargo test --package nefrita-device --test libjade --locked \
+for pin_server_port in 8096 8097; do
+  curl --silent --fail --output /dev/null --retry 60 --retry-delay 1 --retry-all-errors \
+    "http://localhost:$pin_server_port/"
+done
+NEFRITA_LIBJADE_ADDRESS=127.0.0.1:30121 \
+NEFRITA_CUSTOM_PIN_SERVER_URL=http://localhost:8097 \
+NEFRITA_CUSTOM_PIN_SERVER_PUBLIC_KEY_FILE="$custom_pin_server_key_directory/server_public_key.pub" \
+  cargo test --package nefrita-device --test libjade --features debug-methods --locked \
   -- --ignored --test-threads=1
-docker stop libjade-daemon
+docker stop libjade-daemon development-pin-server custom-pin-server
 ```
 
-The firmware is cloned inside `target/`, which git ignores and `cargo clean` deletes. Building libjade takes several minutes, and longer on Apple silicon, where Docker emulates `linux/amd64`. While `target/firmware` and its `build_linux/libjade/libjade_daemon` exist, skip the clone and the build, and start from the `docker run --rm --detach` line. The tests wait up to two minutes for libjade to answer. When the workflow changes `FIRMWARE_COMMIT`, update `firmware_commit` here and build again.
+The firmware and the key pair of the custom PIN server stay inside `target/`, which git ignores and `cargo clean` deletes. Run the preparation once, again after `cargo clean`, and again when the workflow changes `FIRMWARE_COMMIT`, after updating `firmware_commit` here. Building libjade takes several minutes, and longer on Apple silicon, where Docker emulates `linux/amd64`; while `target/firmware/build_linux/libjade/libjade_daemon` is built for the current commit, the `docker run` that builds it can be left out. `generateserverkey` keeps a key pair that already exists.
+
+The PIN servers keep the PINs in memory (`--tmpfs /pins`), so every run starts empty. If the `local-pinserver` of the firmware guide is already running on port 8096, it works as the development PIN server: skip the `docker run` of `development-pin-server` and leave it out of `docker stop`. The tests wait up to two minutes for `libjade_daemon` to answer.
+
+If a test fails, `docker logs` with the name of a container (`libjade-daemon`, `development-pin-server` or `custom-pin-server`) shows its output. Run it before `docker stop`, which removes the containers.
 
 ## Continuous integration
 
-`PR checks` (`.github/workflows/pr-checks.yml`) runs on every pull request to `main`, and on demand with "Run workflow". It has one job per check above, `format`, `lint`, `test` and `dependencies`, and `device-integration` for the integration tests: it builds `libjade_daemon` with XBT from the firmware commit in `FIRMWARE_COMMIT`, caches it per commit, and runs the integration tests against it. The workflow only uses actions created by GitHub, and its token can only read the repository; `device-integration` logs in to Docker Hub with the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets to pull the builder image.
+`PR checks` (`.github/workflows/pr-checks.yml`) runs on every pull request to `main`, and on demand with "Run workflow". It has one job per check above, `format`, `lint`, `test` and `dependencies`, and `device-integration` for the integration tests: it builds `libjade_daemon` with XBT and the PIN server image from the firmware commit in `FIRMWARE_COMMIT`, caches both per commit, generates a new key pair for the custom PIN server on every run, and runs the integration tests against `libjade_daemon` and the two PIN servers. If it fails, the job shows the output of `libjade_daemon` and of each PIN server.
+
+The workflow only uses actions created by GitHub, and its token can only read the repository; `device-integration` logs in to Docker Hub with the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets to pull the builder image and the Debian base image of the PIN server.
