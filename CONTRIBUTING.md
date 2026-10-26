@@ -23,6 +23,7 @@ Then run the same checks as the `format`, `lint`, `test` and `dependencies` jobs
 ```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- --deny warnings
+cargo clippy --workspace --all-targets --locked -- --deny warnings
 cargo test --workspace --all-features --locked
 cargo install --locked cargo-deny --version 0.20.2
 cargo deny --locked check
@@ -31,7 +32,7 @@ cargo deny --locked check
 | Check | What it verifies |
 | --- | --- |
 | `cargo fmt` | The code follows the rustfmt style |
-| `cargo clippy` | No clippy warnings, in any crate or target |
+| `cargo clippy` | No clippy warnings, in any crate or target, with all features and with the default ones |
 | `cargo test` | All tests pass |
 | `cargo deny` | No dependency with a known vulnerability, unmaintained or yanked, only the licenses allowed in `deny.toml`, and only crates from crates.io |
 
