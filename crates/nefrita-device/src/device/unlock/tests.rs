@@ -3,7 +3,7 @@ use serde_json::json;
 use super::*;
 use crate::connection::scripted::{SCRIPTED_REPLY_TIMEOUT, encode_cbor_message};
 use crate::device::scripted::{
-    DEVELOPMENT_PIN_SERVER_URL, ENCRYPTED_DEVICE_MESSAGE, confirmation_reply, device_replying_with,
+    DEVELOPMENT_SET_PIN_URL, ENCRYPTED_DEVICE_MESSAGE, confirmation_reply, device_replying_with,
     pin_server_request_reply, pin_server_request_reply_message, rejection_reply,
     version_information_reply,
 };
@@ -53,7 +53,7 @@ fn unlock_forwards_the_pin_server_request_and_reports_unlocked() {
     assert_eq!(
         pin_server.received_requests(),
         [PinServerRequest {
-            urls: vec![DEVELOPMENT_PIN_SERVER_URL.to_owned()],
+            urls: vec![DEVELOPMENT_SET_PIN_URL.to_owned()],
             root_certificates: Vec::new(),
             device_payload: PinServerPayload {
                 encrypted_message: ENCRYPTED_DEVICE_MESSAGE.to_owned(),

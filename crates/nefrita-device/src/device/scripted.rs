@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use crate::connection::scripted::{ScriptedConnection, ScriptedRead, encode_cbor_message};
 use crate::device::Device;
 
-pub(super) const DEVELOPMENT_PIN_SERVER_URL: &str = "http://localhost:8096/set_pin";
+pub(super) const DEVELOPMENT_SET_PIN_URL: &str = "http://localhost:8096/set_pin";
 pub(super) const ENCRYPTED_DEVICE_MESSAGE: &str = "device message";
 
 pub(super) fn version_information_reply(request_identifier: &str, chain: Option<&str>) -> Vec<u8> {
@@ -36,7 +36,7 @@ pub(super) fn pin_server_request_reply_message(request_identifier: &str) -> Valu
         "id": request_identifier,
         "result": {"http_request": {
             "params": {
-                "urls": [DEVELOPMENT_PIN_SERVER_URL],
+                "urls": [DEVELOPMENT_SET_PIN_URL],
                 "method": "POST",
                 "accept": "json",
                 "data": {"data": ENCRYPTED_DEVICE_MESSAGE},
