@@ -1,7 +1,12 @@
 use std::collections::VecDeque;
 use std::io::{self, ErrorKind, Read, Write};
+use std::time::Duration;
 
 use serde_json::Value;
+
+use crate::connection::DeviceConnection;
+
+pub(crate) const SCRIPTED_REPLY_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(crate) enum ScriptedRead {
     Bytes(Vec<u8>),
@@ -13,6 +18,8 @@ pub(crate) enum ScriptedRead {
 pub(crate) struct ScriptedConnection {
     scripted_reads: VecDeque<ScriptedRead>,
     written_bytes: Vec<u8>,
+    reply_timeout: Option<Duration>,
+    reply_timeout_changes: Vec<Option<Duration>>,
 }
 
 impl ScriptedConnection {
@@ -20,23 +27,36 @@ impl ScriptedConnection {
         Self {
             scripted_reads: scripted_reads.into(),
             written_bytes: Vec::new(),
+            reply_timeout: Some(SCRIPTED_REPLY_TIMEOUT),
+            reply_timeout_changes: Vec::new(),
         }
     }
 
-    pub(crate) fn written_messages(&self) -> Vec<Value> {
+    pub(crate) fn encoded_written_messages(&self) -> Vec<Vec<u8>> {
         let mut decoder = minicbor::Decoder::new(&self.written_bytes);
-        let mut written_messages = Vec::new();
+        let mut encoded_written_messages = Vec::new();
         while decoder.position() < self.written_bytes.len() {
             let message_start = decoder.position();
             decoder
                 .skip()
                 .expect("the client should write complete CBOR messages");
-            let message_bytes = &self.written_bytes[message_start..decoder.position()];
-            written_messages.push(
-                minicbor_serde::from_slice(message_bytes).expect("written messages should decode"),
-            );
+            encoded_written_messages
+                .push(self.written_bytes[message_start..decoder.position()].to_vec());
         }
-        written_messages
+        encoded_written_messages
+    }
+
+    pub(crate) fn written_messages(&self) -> Vec<Value> {
+        self.encoded_written_messages()
+            .iter()
+            .map(|encoded_message| {
+                minicbor_serde::from_slice(encoded_message).expect("written messages should decode")
+            })
+            .collect()
+    }
+
+    pub(crate) fn reply_timeout_changes(&self) -> &[Option<Duration>] {
+        &self.reply_timeout_changes
     }
 }
 
@@ -68,6 +88,18 @@ impl Write for ScriptedConnection {
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl DeviceConnection for ScriptedConnection {
+    fn reply_timeout(&self) -> io::Result<Option<Duration>> {
+        Ok(self.reply_timeout)
+    }
+
+    fn set_reply_timeout(&mut self, reply_timeout: Option<Duration>) -> io::Result<()> {
+        self.reply_timeout = reply_timeout;
+        self.reply_timeout_changes.push(reply_timeout);
         Ok(())
     }
 }

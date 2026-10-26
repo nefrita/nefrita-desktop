@@ -38,8 +38,11 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
 
-      - name: Run clippy
+      - name: Run clippy with all features
         run: cargo clippy --workspace --all-targets --all-features --locked -- --deny warnings
+
+      - name: Run clippy with default features
+        run: cargo clippy --workspace --all-targets --locked -- --deny warnings
 
   test:
     runs-on: ubuntu-latest
@@ -86,6 +89,12 @@ jobs:
       FIRMWARE_COMMIT: e18deffd96fb293730a51c9874c73ab4ca6e841a
       JADE_BUILDER_IMAGE: blockstream/jade_builder@sha256:cbf0aabee7513dc8cad8f1d69a5e00f5b73bcd0965a44254627c0de4bfc8c4f2
       LIBJADE_PORT: 30121
+      PIN_SERVER_IMAGE: pin-server
+      PIN_SERVER_IMAGE_ARCHIVE: ${{ github.workspace }}/pin-server-image.tar
+      PIN_SERVER_CONTAINER_PORT: 8096
+      DEVELOPMENT_PIN_SERVER_PORT: 8096
+      CUSTOM_PIN_SERVER_PORT: 8097
+      CUSTOM_PIN_SERVER_KEY_DIRECTORY: ${{ github.workspace }}/target/custom-pin-server
     steps:
       - uses: actions/checkout@v7
 
@@ -126,16 +135,68 @@ jobs:
             --volume "$PWD/firmware/build_linux/libjade":/libjade \
             "$JADE_BUILDER_IMAGE" /libjade/libjade_daemon --tcp "$LIBJADE_PORT"
 
+      - name: Restore the PIN server image archive
+        id: pin-server-image-cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.PIN_SERVER_IMAGE_ARCHIVE }}
+          key: pin-server-image-${{ env.FIRMWARE_COMMIT }}
+
+      - name: Build the PIN server image and save its archive
+        if: steps.pin-server-image-cache.outputs.cache-hit != 'true'
+        run: |
+          docker build --tag "$PIN_SERVER_IMAGE" firmware/pinserver
+          docker save --output "$PIN_SERVER_IMAGE_ARCHIVE" "$PIN_SERVER_IMAGE"
+
+      - name: Load the PIN server image
+        if: steps.pin-server-image-cache.outputs.cache-hit == 'true'
+        run: docker load --input "$PIN_SERVER_IMAGE_ARCHIVE"
+
+      - name: Generate the custom PIN server key pair
+        run: |
+          mkdir -p "$CUSTOM_PIN_SERVER_KEY_DIRECTORY"
+          docker run --rm --volume "$CUSTOM_PIN_SERVER_KEY_DIRECTORY":/keys --workdir /keys \
+            --env PYTHONPATH=/ "$PIN_SERVER_IMAGE" python3 -m pinserver.generateserverkey
+
+      - name: Start the PIN servers
+        run: |
+          docker run --detach --name development-pin-server \
+            --publish "$DEVELOPMENT_PIN_SERVER_PORT:$PIN_SERVER_CONTAINER_PORT" --tmpfs /pins \
+            --volume "$PWD/firmware/server_private_key.key":/server_private_key.key:ro \
+            "$PIN_SERVER_IMAGE"
+          docker run --detach --name custom-pin-server \
+            --publish "$CUSTOM_PIN_SERVER_PORT:$PIN_SERVER_CONTAINER_PORT" --tmpfs /pins \
+            --volume "$CUSTOM_PIN_SERVER_KEY_DIRECTORY/server_private_key.key":/server_private_key.key:ro \
+            "$PIN_SERVER_IMAGE"
+
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
 
+      - name: Wait for the PIN servers
+        run: |
+          for pin_server_port in "$DEVELOPMENT_PIN_SERVER_PORT" "$CUSTOM_PIN_SERVER_PORT"; do
+            curl --silent --fail --output /dev/null --retry 60 --retry-delay 1 \
+              --retry-all-errors "http://localhost:$pin_server_port/"
+          done
+
       - name: Run the integration tests
+        timeout-minutes: 10
         env:
           NEFRITA_LIBJADE_ADDRESS: 127.0.0.1:${{ env.LIBJADE_PORT }}
+          NEFRITA_CUSTOM_PIN_SERVER_URL: http://localhost:${{ env.CUSTOM_PIN_SERVER_PORT }}
+          NEFRITA_CUSTOM_PIN_SERVER_PUBLIC_KEY_FILE: ${{ env.CUSTOM_PIN_SERVER_KEY_DIRECTORY }}/server_public_key.pub
         run: |
-          cargo test --package nefrita-device --test libjade --locked \
+          cargo test --package nefrita-device --test libjade --features debug-methods --locked \
             -- --ignored --test-threads=1
 
       - name: Show the libjade_daemon output
         if: failure()
         run: docker logs libjade-daemon
+
+      - name: Show the development PIN server output
+        if: failure()
+        run: docker logs development-pin-server
+
+      - name: Show the custom PIN server output
+        if: failure()
+        run: docker logs custom-pin-server

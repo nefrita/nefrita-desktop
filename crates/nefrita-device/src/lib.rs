@@ -1,9 +1,15 @@
+mod connection;
 mod device;
 mod error;
-mod message;
-#[cfg(test)]
-mod scripted_connection;
+mod pin_server;
+mod protocol;
 
-pub use device::{Device, DeviceState, VersionInformation};
+pub use connection::DeviceConnection;
+#[cfg(feature = "debug-methods")]
+pub use device::DebugWalletKind;
+pub use device::{CustomPinServer, Device, DeviceState, UnlockOutcome, VersionInformation};
 pub use error::DeviceError;
-pub use message::{ErrorReply, ErrorReplyKind};
+pub use pin_server::{
+    HttpPinServer, PinServer, PinServerError, PinServerPayload, PinServerRequest,
+};
+pub use protocol::{ErrorReply, ErrorReplyKind, Network};
