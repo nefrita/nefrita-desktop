@@ -13,6 +13,7 @@ minicbor = { version = "2.3.1", features = ["std"] }
 minicbor-serde = { version = "0.7.2", features = ["std"] }
 rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs", "prefer-post-quantum"] }
 serde = { version = "1.0.229", features = ["derive"] }
+serialport = { version = "4.10.1", default-features = false }
 ureq = { version = "3.5.0", default-features = false, features = ["json", "platform-verifier", "rustls-no-provider"] }
 
 [dev-dependencies]
