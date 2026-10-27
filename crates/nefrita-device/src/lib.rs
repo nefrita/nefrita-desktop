@@ -4,7 +4,7 @@ mod error;
 mod pin_server;
 mod protocol;
 
-pub use connection::DeviceConnection;
+pub use connection::{DeviceConnection, SerialConnection};
 #[cfg(feature = "debug-methods")]
 pub use device::DebugWalletKind;
 pub use device::{CustomPinServer, Device, DeviceState, UnlockOutcome, VersionInformation};
