@@ -6,7 +6,7 @@ use crate::device::Device;
 pub(super) const DEVELOPMENT_SET_PIN_URL: &str = "http://localhost:8096/set_pin";
 pub(super) const ENCRYPTED_DEVICE_MESSAGE: &str = "device message";
 
-pub(super) fn version_information_reply(request_identifier: &str, chain: Option<&str>) -> Vec<u8> {
+pub(crate) fn version_information_reply(request_identifier: &str, chain: Option<&str>) -> Vec<u8> {
     let mut version_information = json!({
         "JADE_VERSION": "1.0.41",
         "BOARD_TYPE": "M5_STICKC_PLUS_2",
