@@ -2,7 +2,7 @@ mod custom_pin_server;
 #[cfg(feature = "debug-methods")]
 mod debug_methods;
 #[cfg(test)]
-mod scripted;
+pub(crate) mod scripted;
 mod unlock;
 mod version_information;
 
