@@ -47,7 +47,7 @@ fn unlock_over_usb() -> Result<(), Box<dyn Error>> {
         "Unlocking on {}: follow the steps on the device",
         program_options.network.protocol_name()
     );
-    match device.unlock(program_options.network, &mut HttpPinServer)? {
+    match device.unlock(program_options.network, &mut HttpPinServer::direct())? {
         UnlockOutcome::Unlocked => println!("Unlocked"),
         UnlockOutcome::Refused => println!("The device refused the PIN"),
     }

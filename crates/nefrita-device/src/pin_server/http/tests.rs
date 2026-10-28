@@ -1,3 +1,5 @@
+use std::net::TcpListener;
+
 use rcgen::{BasicConstraints, IsCa, KeyPair};
 
 use super::*;
@@ -5,14 +7,15 @@ use crate::pin_server::test_certificates::{
     certificate_authority, certificate_signed_by, self_signed_certificate,
 };
 use crate::pin_server::test_server::{
-    CapturedHttpRequest, ScriptedHttpResponse, TEST_SERVER_ADDRESS, start_http_server,
-    start_https_server,
+    CapturedHttpRequest, ScriptedHttpResponse, TEST_SERVER_ADDRESS, closed_local_address,
+    listen_without_blocking, start_http_server, start_https_server,
 };
 
 const ENCRYPTED_DEVICE_MESSAGE: &str = "device message";
 const ENCRYPTED_SERVER_REPLY: &str = "server reply";
 const OWN_AUTHORITY_NAME: &str = "Nefrita test authority";
 const OTHER_AUTHORITY_NAME: &str = "Other test authority";
+const ONION_PIN_SERVER_URL: &str = "http://pinserver.onion/get_pin";
 
 const SERVER_REPLY_RESPONSE: ScriptedHttpResponse = ScriptedHttpResponse {
     status_line: "HTTP/1.1 200 OK",
@@ -20,14 +23,21 @@ const SERVER_REPLY_RESPONSE: ScriptedHttpResponse = ScriptedHttpResponse {
     response_body: r#"{"data":"server reply"}"#,
 };
 
-fn pin_server_request(pin_server_url: String, root_certificates: Vec<String>) -> PinServerRequest {
+fn pin_server_request(
+    pin_server_urls: Vec<String>,
+    root_certificates: Vec<String>,
+) -> PinServerRequest {
     PinServerRequest {
-        urls: vec![pin_server_url],
+        urls: pin_server_urls,
         root_certificates,
         device_payload: PinServerPayload {
             encrypted_message: ENCRYPTED_DEVICE_MESSAGE.to_owned(),
         },
     }
+}
+
+fn local_pin_server_url(url_scheme: &str, server_port: u16) -> String {
+    format!("{url_scheme}://{TEST_SERVER_ADDRESS}:{server_port}/get_pin")
 }
 
 fn server_reply_payload() -> PinServerPayload {
@@ -43,8 +53,8 @@ fn exchange_over_http(
     CapturedHttpRequest,
 ) {
     let (server_port, server_thread) = start_http_server(scripted_response);
-    let exchange_attempt = HttpPinServer.exchange(&pin_server_request(
-        format!("http://{TEST_SERVER_ADDRESS}:{server_port}/get_pin"),
+    let exchange_attempt = HttpPinServer::direct().exchange(&pin_server_request(
+        vec![local_pin_server_url("http", server_port)],
         Vec::new(),
     ));
     let captured_request = server_thread
@@ -61,8 +71,8 @@ fn exchange_over_https(
 ) -> Result<PinServerPayload, PinServerError> {
     let (server_port, server_thread) =
         start_https_server(server_certificate, server_key, SERVER_REPLY_RESPONSE);
-    let exchange_attempt = HttpPinServer.exchange(&pin_server_request(
-        format!("https://{TEST_SERVER_ADDRESS}:{server_port}/get_pin"),
+    let exchange_attempt = HttpPinServer::direct().exchange(&pin_server_request(
+        vec![local_pin_server_url("https", server_port)],
         root_certificates_pem,
     ));
     server_thread
@@ -75,6 +85,14 @@ fn assert_request_failed(exchange_attempt: &Result<PinServerPayload, PinServerEr
     assert!(
         matches!(exchange_attempt, Err(PinServerError::RequestFailed(_))),
         "expected a failed request, got {exchange_attempt:?}"
+    );
+}
+
+fn assert_never_contacted(normal_url_listener: &TcpListener) {
+    let accept_attempt = normal_url_listener.accept();
+    assert!(
+        matches!(&accept_attempt, Err(accept_error) if accept_error.kind() == ErrorKind::WouldBlock),
+        "expected no connection to the normal URL, got {accept_attempt:?}"
     );
 }
 
@@ -211,4 +229,36 @@ fn self_signed_certificate_marked_as_authority_is_refused() {
         request_error_description.contains("CaUsedAsEndEntity"),
         "unexpected error: {request_error_description}"
     );
+}
+
+#[test]
+fn tor_route_without_an_onion_url_fails_before_contacting_the_normal_url() {
+    let (normal_url_listener, normal_url_port) = listen_without_blocking();
+    let normal_url = local_pin_server_url("http", normal_url_port);
+    let exchange_attempt = HttpPinServer::through_tor(closed_local_address())
+        .exchange(&pin_server_request(vec![normal_url.clone()], Vec::new()));
+    assert_eq!(
+        exchange_attempt,
+        Err(PinServerError::NoOnionUrl(vec![normal_url]))
+    );
+    assert_never_contacted(&normal_url_listener);
+}
+
+#[test]
+fn tor_route_with_the_proxy_down_fails_without_contacting_the_normal_url() {
+    let (normal_url_listener, normal_url_port) = listen_without_blocking();
+    let tor_socks_proxy_address = closed_local_address();
+    let exchange_attempt =
+        HttpPinServer::through_tor(tor_socks_proxy_address).exchange(&pin_server_request(
+            vec![
+                local_pin_server_url("http", normal_url_port),
+                ONION_PIN_SERVER_URL.to_owned(),
+            ],
+            Vec::new(),
+        ));
+    assert_eq!(
+        exchange_attempt,
+        Err(PinServerError::TorProxyUnreachable(tor_socks_proxy_address))
+    );
+    assert_never_contacted(&normal_url_listener);
 }

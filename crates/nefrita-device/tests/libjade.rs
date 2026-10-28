@@ -36,7 +36,7 @@ impl PinServer for RecordingHttpPinServer {
     ) -> Result<PinServerPayload, PinServerError> {
         self.requested_urls
             .extend(pin_server_request.urls.iter().cloned());
-        HttpPinServer.exchange(pin_server_request)
+        HttpPinServer::direct().exchange(pin_server_request)
     }
 }
 
@@ -200,7 +200,7 @@ fn unreachable_custom_pin_server_fails_the_unlock() {
     device
         .debug_set_mnemonic(PUBLIC_TEST_MNEMONIC, DebugWalletKind::SavedWithPin)
         .expect("libjade should accept the test mnemonic");
-    let unlock_attempt = device.unlock(UNLOCK_NETWORK, &mut HttpPinServer);
+    let unlock_attempt = device.unlock(UNLOCK_NETWORK, &mut HttpPinServer::direct());
     let Err(DeviceError::PinServerFailed(pin_server_error)) = unlock_attempt else {
         panic!("expected a failed PIN server exchange, got {unlock_attempt:?}");
     };
