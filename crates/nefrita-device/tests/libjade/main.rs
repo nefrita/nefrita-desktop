@@ -1,6 +1,8 @@
+mod socks_proxy;
+
 use std::env;
 use std::fs;
-use std::net::TcpStream;
+use std::net::{SocketAddr, TcpStream};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -8,6 +10,8 @@ use nefrita_device::{
     CustomPinServer, DebugWalletKind, Device, DeviceError, HttpPinServer, Network, PinServer,
     PinServerError, PinServerPayload, PinServerRequest, UnlockOutcome,
 };
+
+use crate::socks_proxy::{HostAndPort, TestSocksProxy, closed_proxy_address};
 
 const LIBJADE_ADDRESS_VARIABLE: &str = "NEFRITA_LIBJADE_ADDRESS";
 const CUSTOM_PIN_SERVER_URL_VARIABLE: &str = "NEFRITA_CUSTOM_PIN_SERVER_URL";
@@ -23,10 +27,28 @@ const DEVELOPMENT_PIN_SERVER_URL: &str = "http://localhost:8096";
 const UNREACHABLE_PIN_SERVER_URL: &str = "http://127.0.0.1:1";
 const DEFAULT_PIN_TO_ENTER: u32 = 12345;
 const WRONG_PIN_TO_ENTER: u32 = 111111;
+const TEST_ONION_HOST_NAME: &str = "nefritatestpinserver.onion";
+const DEFAULT_HTTP_PORT: u16 = 80;
 
-#[derive(Default)]
 struct RecordingHttpPinServer {
-    requested_urls: Vec<String>,
+    http_pin_server: HttpPinServer,
+    offered_urls: Vec<String>,
+}
+
+impl RecordingHttpPinServer {
+    fn direct() -> Self {
+        Self {
+            http_pin_server: HttpPinServer::direct(),
+            offered_urls: Vec::new(),
+        }
+    }
+
+    fn through_tor(tor_socks_proxy_address: SocketAddr) -> Self {
+        Self {
+            http_pin_server: HttpPinServer::through_tor(tor_socks_proxy_address),
+            offered_urls: Vec::new(),
+        }
+    }
 }
 
 impl PinServer for RecordingHttpPinServer {
@@ -34,9 +56,9 @@ impl PinServer for RecordingHttpPinServer {
         &mut self,
         pin_server_request: &PinServerRequest,
     ) -> Result<PinServerPayload, PinServerError> {
-        self.requested_urls
+        self.offered_urls
             .extend(pin_server_request.urls.iter().cloned());
-        HttpPinServer::direct().exchange(pin_server_request)
+        self.http_pin_server.exchange(pin_server_request)
     }
 }
 
@@ -70,7 +92,11 @@ fn connect_to_clean_libjade() -> Device<TcpStream> {
     device
 }
 
-fn custom_pin_server_at(url: &str) -> CustomPinServer {
+fn required_custom_pin_server_url() -> String {
+    required_environment_variable(CUSTOM_PIN_SERVER_URL_VARIABLE, "the custom PIN server")
+}
+
+fn custom_pin_server_at(pin_server_url: &str) -> CustomPinServer {
     let public_key_file = required_environment_variable(
         CUSTOM_PIN_SERVER_PUBLIC_KEY_FILE_VARIABLE,
         "the public key file of the custom PIN server",
@@ -78,7 +104,7 @@ fn custom_pin_server_at(url: &str) -> CustomPinServer {
     let public_key_bytes = fs::read(&public_key_file)
         .unwrap_or_else(|read_error| panic!("{public_key_file} should be readable: {read_error}"));
     CustomPinServer {
-        url: url.to_owned(),
+        url: pin_server_url.to_owned(),
         onion_url: None,
         public_key: public_key_bytes
             .try_into()
@@ -87,10 +113,21 @@ fn custom_pin_server_at(url: &str) -> CustomPinServer {
     }
 }
 
-fn create_pin_wallet(device: &mut Device<TcpStream>, pin_server: &mut RecordingHttpPinServer) {
+fn custom_pin_server_with_test_onion_at(pin_server_url: &str) -> CustomPinServer {
+    CustomPinServer {
+        onion_url: Some(format!("http://{TEST_ONION_HOST_NAME}")),
+        ..custom_pin_server_at(pin_server_url)
+    }
+}
+
+fn set_test_mnemonic(device: &mut Device<TcpStream>, wallet_kind: DebugWalletKind) {
     device
-        .debug_set_mnemonic(PUBLIC_TEST_MNEMONIC, DebugWalletKind::SavedWithPin)
+        .debug_set_mnemonic(PUBLIC_TEST_MNEMONIC, wallet_kind)
         .expect("libjade should accept the test mnemonic");
+}
+
+fn create_pin_wallet(device: &mut Device<TcpStream>, pin_server: &mut RecordingHttpPinServer) {
+    set_test_mnemonic(device, DebugWalletKind::SavedWithPin);
     let unlock_outcome = device
         .unlock(UNLOCK_NETWORK, pin_server)
         .expect("the new PIN should be registered");
@@ -111,7 +148,7 @@ fn xbt_libjade_reports_the_xbt_chain() {
 #[ignore = "needs libjade_daemon built with XBT and the development PIN server"]
 fn pin_wallet_is_created_and_unlocked_with_the_development_pin_server() {
     let mut device = connect_to_clean_libjade();
-    let mut pin_server = RecordingHttpPinServer::default();
+    let mut pin_server = RecordingHttpPinServer::direct();
     create_pin_wallet(&mut device, &mut pin_server);
     device.logout().expect("libjade should log out");
     let unlock_outcome = device
@@ -119,7 +156,7 @@ fn pin_wallet_is_created_and_unlocked_with_the_development_pin_server() {
         .expect("the unlock should finish");
     assert_eq!(unlock_outcome, UnlockOutcome::Unlocked);
     assert_eq!(
-        pin_server.requested_urls,
+        pin_server.offered_urls,
         [
             format!("{DEVELOPMENT_PIN_SERVER_URL}/set_pin"),
             format!("{DEVELOPMENT_PIN_SERVER_URL}/get_pin"),
@@ -131,7 +168,7 @@ fn pin_wallet_is_created_and_unlocked_with_the_development_pin_server() {
 #[ignore = "needs libjade_daemon built with XBT and the development PIN server"]
 fn wrong_pin_is_refused_and_the_right_pin_unlocks() {
     let mut device = connect_to_clean_libjade();
-    let mut pin_server = RecordingHttpPinServer::default();
+    let mut pin_server = RecordingHttpPinServer::direct();
     create_pin_wallet(&mut device, &mut pin_server);
     device.logout().expect("libjade should log out");
     device
@@ -153,13 +190,12 @@ fn wrong_pin_is_refused_and_the_right_pin_unlocks() {
 #[test]
 #[ignore = "needs libjade_daemon built with XBT and the custom PIN server"]
 fn pin_wallet_is_created_and_unlocked_with_the_custom_pin_server() {
-    let custom_pin_server_url =
-        required_environment_variable(CUSTOM_PIN_SERVER_URL_VARIABLE, "the custom PIN server");
+    let custom_pin_server_url = required_custom_pin_server_url();
     let mut device = connect_to_clean_libjade();
     device
         .set_custom_pin_server(&custom_pin_server_at(&custom_pin_server_url))
         .expect("libjade should accept the custom PIN server");
-    let mut pin_server = RecordingHttpPinServer::default();
+    let mut pin_server = RecordingHttpPinServer::direct();
     create_pin_wallet(&mut device, &mut pin_server);
     device.logout().expect("libjade should log out");
     let unlock_outcome = device
@@ -167,7 +203,7 @@ fn pin_wallet_is_created_and_unlocked_with_the_custom_pin_server() {
         .expect("the unlock should finish");
     assert_eq!(unlock_outcome, UnlockOutcome::Unlocked);
     assert_eq!(
-        pin_server.requested_urls,
+        pin_server.offered_urls,
         [
             format!("{custom_pin_server_url}/set_pin"),
             format!("{custom_pin_server_url}/get_pin"),
@@ -176,18 +212,54 @@ fn pin_wallet_is_created_and_unlocked_with_the_custom_pin_server() {
 }
 
 #[test]
+#[ignore = "needs libjade_daemon built with XBT and the custom PIN server"]
+fn pin_wallet_is_created_and_unlocked_through_tor_with_the_custom_pin_server() {
+    let custom_pin_server_url = required_custom_pin_server_url();
+    let test_socks_proxy = TestSocksProxy::forwarding_to(&custom_pin_server_url);
+    let mut device = connect_to_clean_libjade();
+    device
+        .set_custom_pin_server(&custom_pin_server_with_test_onion_at(
+            &custom_pin_server_url,
+        ))
+        .expect("libjade should accept the custom PIN server with an onion URL");
+    let mut pin_server = RecordingHttpPinServer::through_tor(test_socks_proxy.address);
+    create_pin_wallet(&mut device, &mut pin_server);
+    device.logout().expect("libjade should log out");
+    let unlock_outcome = device
+        .unlock(UNLOCK_NETWORK, &mut pin_server)
+        .expect("the unlock through Tor should finish");
+    assert_eq!(unlock_outcome, UnlockOutcome::Unlocked);
+    let test_onion_url = format!("http://{TEST_ONION_HOST_NAME}");
+    assert_eq!(
+        pin_server.offered_urls,
+        [
+            format!("{custom_pin_server_url}/set_pin"),
+            format!("{test_onion_url}/set_pin"),
+            format!("{custom_pin_server_url}/get_pin"),
+            format!("{test_onion_url}/get_pin"),
+        ]
+    );
+    let onion_connect_target = HostAndPort {
+        host_name: TEST_ONION_HOST_NAME.to_owned(),
+        port: DEFAULT_HTTP_PORT,
+    };
+    assert_eq!(
+        test_socks_proxy.connect_targets(),
+        [onion_connect_target.clone(), onion_connect_target]
+    );
+}
+
+#[test]
 #[ignore = "needs libjade_daemon built with XBT, listening at NEFRITA_LIBJADE_ADDRESS"]
 fn temporary_wallet_unlocks_without_the_pin_server() {
     let mut device = connect_to_clean_libjade();
-    device
-        .debug_set_mnemonic(PUBLIC_TEST_MNEMONIC, DebugWalletKind::Temporary)
-        .expect("libjade should accept the test mnemonic");
-    let mut pin_server = RecordingHttpPinServer::default();
+    set_test_mnemonic(&mut device, DebugWalletKind::Temporary);
+    let mut pin_server = RecordingHttpPinServer::direct();
     let unlock_outcome = device
         .unlock(UNLOCK_NETWORK, &mut pin_server)
         .expect("the unlock should finish");
     assert_eq!(unlock_outcome, UnlockOutcome::Unlocked);
-    assert!(pin_server.requested_urls.is_empty());
+    assert!(pin_server.offered_urls.is_empty());
 }
 
 #[test]
@@ -197,9 +269,7 @@ fn unreachable_custom_pin_server_fails_the_unlock() {
     device
         .set_custom_pin_server(&custom_pin_server_at(UNREACHABLE_PIN_SERVER_URL))
         .expect("libjade should accept the custom PIN server");
-    device
-        .debug_set_mnemonic(PUBLIC_TEST_MNEMONIC, DebugWalletKind::SavedWithPin)
-        .expect("libjade should accept the test mnemonic");
+    set_test_mnemonic(&mut device, DebugWalletKind::SavedWithPin);
     let unlock_attempt = device.unlock(UNLOCK_NETWORK, &mut HttpPinServer::direct());
     let Err(DeviceError::PinServerFailed(pin_server_error)) = unlock_attempt else {
         panic!("expected a failed PIN server exchange, got {unlock_attempt:?}");
@@ -207,5 +277,30 @@ fn unreachable_custom_pin_server_fails_the_unlock() {
     assert!(
         matches!(pin_server_error, PinServerError::RequestFailed(_)),
         "expected a failed PIN server request, got {pin_server_error:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs libjade_daemon built with XBT and the custom PIN server"]
+fn unreachable_tor_proxy_fails_the_unlock_without_contacting_the_normal_url() {
+    let custom_pin_server_url = required_custom_pin_server_url();
+    let tor_socks_proxy_address = closed_proxy_address();
+    let mut device = connect_to_clean_libjade();
+    device
+        .set_custom_pin_server(&custom_pin_server_with_test_onion_at(
+            &custom_pin_server_url,
+        ))
+        .expect("libjade should accept the custom PIN server with an onion URL");
+    set_test_mnemonic(&mut device, DebugWalletKind::SavedWithPin);
+    let unlock_attempt = device.unlock(
+        UNLOCK_NETWORK,
+        &mut HttpPinServer::through_tor(tor_socks_proxy_address),
+    );
+    let Err(DeviceError::PinServerFailed(pin_server_error)) = unlock_attempt else {
+        panic!("expected a failed PIN server exchange, got {unlock_attempt:?}");
+    };
+    assert_eq!(
+        pin_server_error,
+        PinServerError::TorProxyUnreachable(tor_socks_proxy_address)
     );
 }
