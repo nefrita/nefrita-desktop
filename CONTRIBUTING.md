@@ -114,7 +114,15 @@ The example program `crates/nefrita-device/examples/unlock_over_usb.rs` talks to
 
 ### What you need
 
-- A board from the [DIY list of Jade](https://github.com/Sharmaz/Jade/blob/master/diy/README.md) with the XBT development firmware, connected with a USB cable that carries data. Build the firmware with the "XBT firmware builds" block of the [firmware guide](https://github.com/Sharmaz/Jade/blob/master/CONTRIBUTING.md), with the profile and the chip of your board as the only entry of its loop, for example `display_ttgo_tdisplay:esp32`; the profiles are the `configs/sdkconfig_*.defaults` files of the firmware. The firmware CI only builds XBT for the T-Display and the M5StickC Plus2, so the other boards of the list have not been tried with XBT yet. Then flash it from the `build/` directory of the firmware repository with `esptool` 4.12.0, the version in the builder image (`pip install esptool==4.12.0`). Set `board_port` to the port of your board: the example program lists it even before the board has the XBT firmware (see "Running the example"). Use `esp32s3` instead of `esp32` for an ESP32-S3 board. The first command erases the board, including any wallet stored on it, so that it starts without the data of other firmware:
+- A board from the [DIY list of Jade](https://github.com/Sharmaz/Jade/blob/master/diy/README.md) with the XBT development firmware, connected with a USB cable that carries data. Build the firmware with the "XBT firmware builds" block of the [firmware guide](https://github.com/Sharmaz/Jade/blob/master/CONTRIBUTING.md), with the profile and the chip of your board as the only entry of its loop, for example `display_ttgo_tdisplay:esp32`; the profiles are the `configs/sdkconfig_*.defaults` files of the firmware. The firmware CI only builds XBT for the T-Display and the M5StickC Plus2, so the other boards of the list have not been tried with XBT yet. Then flash it from the `build/` directory of the firmware repository with `esptool` 4.12.0, the version in the builder image. Install it in a Python virtual environment, because the Python of Homebrew does not let pip install packages outside one; the Tor test below uses the same environment:
+
+  ```bash
+  python3 -m venv ~/.venvs/nefrita-board-tools
+  source ~/.venvs/nefrita-board-tools/bin/activate
+  pip install esptool==4.12.0
+  ```
+
+  Set `board_port` to the port of your board: the example program lists it even before the board has the XBT firmware (see "Running the example"). Use `esp32s3` instead of `esp32` for an ESP32-S3 board. The first command erases the board, including any wallet stored on it, so that it starts without the data of other firmware:
 
   ```bash
   board_port=/dev/cu.usbserial-0001
@@ -139,16 +147,71 @@ The program lists, without opening any, the USB serial ports whose chip is on th
 | --- | --- |
 | `Uninitialized` | The board has no wallet: it guides you through creating one and choosing its PIN, and the server receives `/set_pin` |
 | `Locked` | Enter the PIN on the board; the server receives `/get_pin` |
-| `Ready` | The board is already unlocked, and the program ends without asking for the PIN. A second run right after a successful one shows `Ready`: opening and closing the port does not restart the board |
+| `Ready` | The board is already unlocked, and the program ends without asking for the PIN. A second run right after a successful one shows `Ready`: opening and closing the port does not restart the board. To lock it again, choose **Session** and then **Log Out** on the board; unplugging it is not enough on a board with a battery, such as the M5StickC Plus2 |
 
 | Option | Use |
 | --- | --- |
 | `--port <port name>` | Connects to that port without searching: for a board with a chip that is not on the list, or to skip the question |
 | `--network <network>` | The network of the unlock: `xbt`, `xbt-testnet4` (the default) or `xbt-regtest` |
+| `--tor-proxy <IP address:port>` | Sends the PIN server requests through the Tor SOCKS proxy at that address, for example `127.0.0.1:9050`, and only to the onion URL of the board: see "Unlocking through Tor" |
 
 Options go after `--`, for example `cargo run --package nefrita-device --example unlock_over_usb -- --port /dev/cu.usbserial-0001`.
 
 The key pair of the development PIN server is public: a wallet created with it is only for testing, and must never hold real funds.
+
+### Unlocking through Tor
+
+With `--tor-proxy`, the example program sends the PIN server requests through the SOCKS proxy of a Tor that is already running. Then it only uses the onion URL that the board offers: if the board has none, or Tor does not answer, the unlock fails instead of using the normal URL. XBT development builds have no onion URL, so this test gives the board one, from an onion service of your own that forwards to the `local-pinserver`.
+
+Besides the board and the `local-pinserver` of "What you need", the test needs:
+
+- Tor. On macOS, install it with Homebrew: `brew install tor`. On Linux, follow the [installation guide of the Tor Project](https://support.torproject.org/little-t-tor/getting-started/installing/); this test has not been tried on Linux yet. Port 9050 must be free: if another Tor already uses it, stop it first, for example with `brew services stop tor`.
+- jadepy, the Python client of the firmware repository, to give the board the onion URL: run `pip install .` from the root of that repository, in the virtual environment of "What you need".
+
+Start Tor in a terminal of its own and leave it running. It keeps its configuration, its working data and the onion service in `~/.nefrita-tor-test`, and it is ready when it prints `Bootstrapped 100% (done): Done`:
+
+```bash
+tor_test_directory="$HOME/.nefrita-tor-test"
+mkdir -p "$tor_test_directory"
+chmod 700 "$tor_test_directory"
+printf '%s\n' "SocksPort 9050" "DataDirectory $tor_test_directory/working-data" \
+  "HiddenServiceDir $tor_test_directory/onion-service" \
+  "HiddenServicePort 80 127.0.0.1:8096" > "$tor_test_directory/configuration"
+tor -f "$tor_test_directory/configuration"
+```
+
+The first run creates the onion, and later runs keep the same one. Its private key stays in `onion-service/`, inside that directory: never share it or add it to a repository.
+
+In another terminal, set `board_port` again as in "What you need", because a new terminal does not have it. Then, from the root of the firmware repository, activate the virtual environment and give the board the onion as its second PIN server URL:
+
+```bash
+source ~/.venvs/nefrita-board-tools/bin/activate
+onion_host_name=$(cat "$HOME/.nefrita-tor-test/onion-service/hostname")
+python set_jade_pinserver.py --serialport "$board_port" --set-url http://localhost:8096 \
+  --set-url2 "http://$onion_host_name" --set-pubkey xbt_pinserver_public_key.pub
+```
+
+The board shows both URLs and the public key of the development PIN server; the onion URL may not fit on the screen. Confirm them within two minutes, the time the script waits for the board. The public key is the one the board already uses, so the firmware accepts the change and keeps the wallet. The warning of the script about Bluetooth does not matter over USB.
+
+Then, from the root of this repository, unlock through Tor:
+
+```bash
+cargo run --package nefrita-device --example unlock_over_usb -- --port "$board_port" \
+  --tor-proxy 127.0.0.1:9050
+docker logs --tail 3 local-pinserver
+```
+
+The program prints `Sending the PIN server requests through the Tor SOCKS proxy at 127.0.0.1:9050` before the unlock, and `docker logs` shows the request. A new onion can take a while to be reachable: if the board asks `Failed communicating with Oracle - retry ?`, choose to retry. The server logs every request, but Tor and a direct connection reach it from the same computer, so its log does not tell them apart.
+
+To check that the unlock never falls back to the normal URL, stop Tor with Ctrl+C in its terminal, lock the board again (see the `Ready` state above), and run the same two commands. When the board asks to retry, choose not to: the program ends with `the PIN server exchange failed: the Tor SOCKS proxy does not answer at 127.0.0.1:9050`, and `docker logs` shows no new request. Without `--tor-proxy`, the board still unlocks through `http://localhost:8096`: the program only uses the onion through Tor.
+
+Tor keeps the same onion while `~/.nefrita-tor-test` exists, so `tor -f ~/.nefrita-tor-test/configuration` brings it back for later tests. When you no longer need it, stop Tor, reset the PIN server details of the board to those of its firmware, confirming on the board, and delete the directory. Otherwise the board keeps offering an onion that no longer exists, and an unlock through Tor fails without saying why. Run these commands from the root of the firmware repository, with `board_port` set as in "What you need":
+
+```bash
+source ~/.venvs/nefrita-board-tools/bin/activate
+python set_jade_pinserver.py --serialport "$board_port" --reset-details
+rm -rf "$HOME/.nefrita-tor-test"
+```
 
 ### Ports on each system
 
@@ -164,6 +227,8 @@ The key pair of the development PIN server is public: a wallet created with it i
 - **The connection fails:** only one program can have the port open, so close serial monitors such as `idf.py monitor` first.
 - **`the device firmware is not XBT`:** the board runs other firmware; flash the XBT development firmware.
 - **The unlock fails at the PIN server:** check that the server is running and that it uses the volume where the PIN of that board was created.
+- **`the device offers no onion PIN server URL to use through Tor`:** the board has no onion URL yet; give it one as in "Unlocking through Tor".
+- **`the Tor SOCKS proxy does not answer at …`:** Tor is not running at that address; start it, or pass the address of its `SocksPort` to `--tor-proxy`.
 
 ## Continuous integration
 
