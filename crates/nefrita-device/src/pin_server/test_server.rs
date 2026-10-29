@@ -1,5 +1,5 @@
 use std::io::{self, ErrorKind, Read, Write};
-use std::net::TcpListener;
+use std::net::{SocketAddr, TcpListener};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -58,6 +58,21 @@ pub(super) fn start_https_server(
         serve_one_https_request(server_listener, tls_server_config, &scripted_response).ok();
     });
     (server_port, server_thread)
+}
+
+pub(super) fn listen_without_blocking() -> (TcpListener, u16) {
+    let (server_listener, server_port) = listen_on_local_port();
+    server_listener
+        .set_nonblocking(true)
+        .expect("the test listener should stop blocking");
+    (server_listener, server_port)
+}
+
+pub(super) fn closed_local_address() -> SocketAddr {
+    let (server_listener, _) = listen_on_local_port();
+    server_listener
+        .local_addr()
+        .expect("the test listener should have a local address")
 }
 
 fn serve_one_https_request(

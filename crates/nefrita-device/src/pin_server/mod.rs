@@ -9,10 +9,18 @@ mod test_certificates;
 mod test_server;
 mod url_choice;
 
+use std::net::SocketAddr;
+
 use serde::{Deserialize, Serialize};
 
 pub use error::PinServerError;
 pub use http::HttpPinServer;
+
+#[derive(Debug, Clone, Copy)]
+enum PinServerRoute {
+    Direct,
+    Tor { socks_proxy_address: SocketAddr },
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PinServerPayload {

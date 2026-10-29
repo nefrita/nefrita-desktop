@@ -1,6 +1,7 @@
 use std::env;
 use std::error::Error;
 use std::io::{self, Write};
+use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -11,11 +12,13 @@ use nefrita_device::{
 const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
 const PORT_OPTION: &str = "--port";
 const NETWORK_OPTION: &str = "--network";
+const TOR_PROXY_OPTION: &str = "--tor-proxy";
 const DEFAULT_NETWORK: Network = Network::XbtTestnet4;
 
 struct ProgramOptions {
     port_name: Option<String>,
     network: Network,
+    tor_socks_proxy_address: Option<SocketAddr>,
 }
 
 fn main() -> ExitCode {
@@ -43,11 +46,21 @@ fn unlock_over_usb() -> Result<(), Box<dyn Error>> {
         version_information.board_type,
         version_information.device_state
     );
+    let mut http_pin_server = match program_options.tor_socks_proxy_address {
+        Some(tor_socks_proxy_address) => {
+            println!(
+                "Sending the PIN server requests through the Tor SOCKS proxy at \
+                 {tor_socks_proxy_address}"
+            );
+            HttpPinServer::through_tor(tor_socks_proxy_address)
+        }
+        None => HttpPinServer::direct(),
+    };
     println!(
         "Unlocking on {}: follow the steps on the device",
         program_options.network.protocol_name()
     );
-    match device.unlock(program_options.network, &mut HttpPinServer)? {
+    match device.unlock(program_options.network, &mut http_pin_server)? {
         UnlockOutcome::Unlocked => println!("Unlocked"),
         UnlockOutcome::Refused => println!("The device refused the PIN"),
     }
@@ -60,6 +73,7 @@ fn parse_program_options(
     let mut program_options = ProgramOptions {
         port_name: None,
         network: DEFAULT_NETWORK,
+        tor_socks_proxy_address: None,
     };
     while let Some(option_name) = arguments.next() {
         match option_name.as_str() {
@@ -69,6 +83,11 @@ fn parse_program_options(
             NETWORK_OPTION => {
                 program_options.network =
                     parse_network(&option_value(&mut arguments, &option_name)?)?;
+            }
+            TOR_PROXY_OPTION => {
+                program_options.tor_socks_proxy_address = Some(parse_tor_socks_proxy_address(
+                    &option_value(&mut arguments, &option_name)?,
+                )?);
             }
             _ => return Err(with_usage(format!("unknown option {option_name}"))),
         }
@@ -90,11 +109,22 @@ fn parse_network(network_name: &str) -> Result<Network, String> {
         .ok_or_else(|| with_usage(format!("unknown network {network_name}")))
 }
 
+fn parse_tor_socks_proxy_address(
+    typed_tor_socks_proxy_address: &str,
+) -> Result<SocketAddr, String> {
+    typed_tor_socks_proxy_address.parse().map_err(|_| {
+        with_usage(format!(
+            "{typed_tor_socks_proxy_address} is not an IP address and port like 127.0.0.1:9050"
+        ))
+    })
+}
+
 fn with_usage(problem_description: String) -> String {
     let network_names = Network::ALL.map(Network::protocol_name).join("|");
     format!(
         "{problem_description}\n\
-         usage: unlock_over_usb [{PORT_OPTION} <port name>] [{NETWORK_OPTION} {network_names}]"
+         usage: unlock_over_usb [{PORT_OPTION} <port name>] [{NETWORK_OPTION} {network_names}] \
+         [{TOR_PROXY_OPTION} <IP address:port>]"
     )
 }
 
