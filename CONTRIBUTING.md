@@ -12,19 +12,30 @@ Each domain of a crate lives in its own folder, with a `mod.rs` that declares it
 
 ## Local checks
 
+The app crate, `nefrita-app`, is built on Tauri, which uses the web view of each system, so clippy, the tests and the release build need what this table lists for each system to compile it:
+
+| System | What to install |
+| --- | --- |
+| Debian and Ubuntu | `sudo apt-get update`, then `sudo apt-get install --no-install-recommends build-essential pkg-config libwebkit2gtk-4.1-dev` |
+| macOS | The Xcode Command Line Tools: `xcode-select --install` |
+| Windows | The Microsoft C++ Build Tools, with the "Desktop development with C++" workload, and WebView2, which comes with Windows 10 from version 1803 and with later versions |
+
+The Linux commands install the same package as the CI, plus the C compiler and `pkg-config` that the GitHub runners already have; they were tested on Ubuntu 24.04 with the Docker block below. On other distributions, the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) give the name of the WebKitGTK development package; their list also has packages that the build does not use.
+
 The Rust version is pinned in `rust-toolchain.toml`. Install it once, and again whenever that file changes:
 
 ```bash
 rustup toolchain install
 ```
 
-Then run the same checks as the `format`, `lint`, `test` and `dependencies` jobs of the `PR checks` workflow, from the root of the repository:
+Then run the same checks as the `format`, `lint`, `test`, `app-build` and `dependencies` jobs of the `PR checks` workflow, from the root of the repository:
 
 ```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- --deny warnings
 cargo clippy --workspace --all-targets --locked -- --deny warnings
 cargo test --workspace --all-features --locked
+cargo build --release --locked --package nefrita-app --features tauri/custom-protocol
 cargo install --locked cargo-deny --version 0.20.2
 cargo deny --locked check
 ```
@@ -34,11 +45,61 @@ cargo deny --locked check
 | `cargo fmt` | The code follows the rustfmt style |
 | `cargo clippy` | No clippy warnings, in any crate or target, with all features and with the default ones |
 | `cargo test` | All tests pass |
+| `cargo build` | The app compiles in release mode, with its page inside the binary, on your system; the CI builds it on Linux, macOS and Windows |
 | `cargo deny` | No dependency with a known vulnerability, unmaintained or yanked, only the licenses allowed in `deny.toml`, and only crates from crates.io |
 
 `cargo install` only builds cargo-deny the first time; afterwards it reports that the version is already installed. When the workflow changes the cargo-deny version, update it here too.
 
 `cargo deny` only checks the platforms listed under `[graph] targets` in `deny.toml`: the six desktop targets the app is released for (Linux, macOS and Windows, on x86_64 and ARM64). Update that list together with the release builds.
+
+### Running the Linux jobs with Docker
+
+On a system other than Linux, Docker can run the Linux jobs, `lint`, `test` and the Linux `app-build`, in a clean Ubuntu 24.04 with the same package as the CI. From the root of the repository:
+
+```bash
+docker run --rm --env DEBIAN_FRONTEND=noninteractive --volume "$PWD":/host/nefrita-desktop:ro \
+  ubuntu:24.04 bash -c '
+  set -e
+  apt-get update
+  apt-get install --yes --no-install-recommends ca-certificates curl build-essential pkg-config
+  apt-get install --yes --no-install-recommends libwebkit2gtk-4.1-dev
+  mkdir /nefrita-desktop
+  tar --exclude=./target --exclude=./.git --exclude=./crates/nefrita-app/gen \
+    -C /host/nefrita-desktop -cf - . | tar -C /nefrita-desktop -xf -
+  cd /nefrita-desktop
+  curl --proto "=https" --tlsv1.2 --silent --show-error --fail https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal --default-toolchain none
+  . "$HOME/.cargo/env"
+  rustup toolchain install
+  cargo clippy --workspace --all-targets --all-features --locked -- --deny warnings
+  cargo clippy --workspace --all-targets --locked -- --deny warnings
+  cargo test --workspace --all-features --locked
+  cargo build --release --locked --package nefrita-app --features tauri/custom-protocol
+  echo "all Linux jobs passed"
+'
+```
+
+The container first installs what the GitHub runners already have (certificates, `curl`, a C compiler and `pkg-config`), then `libwebkit2gtk-4.1-dev`. It works on a copy of the repository, so it does not touch your `target/`. Then it installs the pinned Rust version and runs the same commands as the jobs. It stops at the first command that fails, and if a system library is missing, the build error names it. It compiles Tauri three times, so it takes a while.
+
+The block is for a bash shell and has only been tried on macOS. On Apple silicon, Docker runs Ubuntu for ARM64, while the CI uses x86_64; the package names are the same.
+
+## Running the app
+
+From the root of the repository:
+
+```bash
+cargo run --package nefrita-app
+```
+
+This opens the app window from a debug build. For now the window shows a placeholder page, and it has no Tauri permissions and no commands of its own. In debug builds, right-clicking the page opens a menu with the web inspector.
+
+To open it as the `app-build` job compiles it, in release mode and with the page inside the binary:
+
+```bash
+cargo run --release --package nefrita-app --features tauri/custom-protocol
+```
+
+`tauri/custom-protocol` is the feature that the Tauri CLI adds to its release builds; until the app uses the CLI, cargo needs it explicitly.
 
 ## Integration tests
 
@@ -232,6 +293,6 @@ rm -rf "$HOME/.nefrita-tor-test"
 
 ## Continuous integration
 
-`PR checks` (`.github/workflows/pr-checks.yml`) runs on every pull request to `main`, and on demand with "Run workflow". It has one job per check above, `format`, `lint`, `test` and `dependencies`, and `device-integration` for the integration tests: it builds `libjade_daemon` with XBT and the PIN server image from the firmware commit in `FIRMWARE_COMMIT`, caches both per commit, generates a new key pair for the custom PIN server on every run, and runs the integration tests against `libjade_daemon` and the two PIN servers. If it fails, the job shows the output of `libjade_daemon` and of each PIN server.
+`PR checks` (`.github/workflows/pr-checks.yml`) runs on every pull request to `main`, and on demand with "Run workflow". It has one job per check above, `format`, `lint`, `test`, `app-build` and `dependencies`, and `device-integration` for the integration tests. On Linux, `lint`, `test` and `app-build` first install `libwebkit2gtk-4.1-dev`, without its recommended packages. `app-build` compiles the app in release mode on Linux x86_64, macOS ARM64 and Windows x86_64, one job per system, and a failure on one system does not cancel the others. `device-integration` builds `libjade_daemon` with XBT and the PIN server image from the firmware commit in `FIRMWARE_COMMIT`, caches both per commit, generates a new key pair for the custom PIN server on every run, and runs the integration tests against `libjade_daemon` and the two PIN servers. If it fails, the job shows the output of `libjade_daemon` and of each PIN server.
 
 The workflow only uses actions created by GitHub, and its token can only read the repository; `device-integration` logs in to Docker Hub with the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets to pull the builder image and the Debian base image of the PIN server.

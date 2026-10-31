@@ -13,6 +13,15 @@ all-features = true
 yanked = "deny"
 unmaintained = "all"
 unsound = "all"
+unused-ignored-advisory = "deny"
+
+[[advisories.ignore]]
+id = "RUSTSEC-2024-0370"
+reason = "proc-macro-error only runs at compile time, inside glib-macros 0.18 of the GTK3 stack that Tauri 2 uses on Linux; remove this exception when Tauri stops using gtk 0.18"
+
+[[advisories.ignore]]
+id = "RUSTSEC-2024-0429"
+reason = "glib 0.18 comes from the GTK3 stack that Tauri 2 uses on Linux, and no other crate in the dependency tree uses VariantStrIter; remove this exception when Tauri stops using gtk 0.18"
 
 [licenses]
 allow = [
@@ -28,7 +37,7 @@ allow = [
     "Zlib",
 ]
 confidence-threshold = 0.93
-unused-allowed-license = "allow"
+unused-allowed-license = "deny"
 
 [licenses.private]
 ignore = true
@@ -36,6 +45,26 @@ ignore = true
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+skip = [
+    { crate = "base64:0.21", reason = "swift-rs, which tauri-utils uses on macOS" },
+    { crate = "bitflags:1", reason = "nix 0.26 of serialport, and WebKitGTK of the GTK3 stack that Tauri 2 uses on Linux" },
+    { crate = "getrandom:0.3", reason = "tauri, while uuid uses getrandom 0.4" },
+    { crate = "hashbrown:0.12", reason = "indexmap 1 of schemars 0.8, which tauri-build and tauri-utils use" },
+    { crate = "heck:0.4", reason = "glib-macros of the GTK3 stack that Tauri 2 uses on Linux" },
+    { crate = "indexmap:1", reason = "schemars 0.8, which tauri-build and tauri-utils use" },
+    { crate = "miniz_oxide:0.8", reason = "png 0.18, which tauri-codegen and muda use" },
+    { crate = "proc-macro-crate:1", reason = "gtk3-macros of the GTK3 stack that Tauri 2 uses on Linux" },
+    { crate = "serde_spanned:0.6", reason = "toml 0.8 of system-deps, which the GTK3 stack uses on Linux" },
+    { crate = "syn:1", reason = "proc-macro-error of glib-macros, in the GTK3 stack that Tauri 2 uses on Linux" },
+    { crate = "syn:2", reason = "most procedural macros, while serde_derive and thiserror 2 already use syn 3" },
+    { crate = "thiserror:1", reason = "glib, gio and cairo-rs of the GTK3 stack that Tauri 2 uses on Linux" },
+    { crate = "thiserror-impl:1", reason = "thiserror 1 of the GTK3 stack that Tauri 2 uses on Linux" },
+    { crate = "toml:0.8", reason = "system-deps, which the GTK3 stack uses on Linux" },
+    { crate = "toml_datetime:0.6", reason = "toml 0.8 and toml_edit 0.19 and 0.20 of the GTK3 stack" },
+    { crate = "toml_edit:0.19", reason = "proc-macro-crate 1 of gtk3-macros, while glib-macros uses toml_edit 0.20" },
+    { crate = "windows-sys:0.52", reason = "serialport on Windows" },
+    { crate = "winnow:0.5", reason = "toml_edit 0.19 and 0.20 of the GTK3 stack" },
+]
 
 [sources]
 unknown-registry = "deny"

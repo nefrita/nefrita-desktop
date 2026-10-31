@@ -1,0 +1,23 @@
+{
+  "productName": "Nefrita",
+  "identifier": "org.nefrita.desktop",
+  "build": {
+    "frontendDist": "static"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "title": "Nefrita"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'",
+      "freezePrototype": true
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["icons/icon.png", "icons/icon.ico"]
+  }
+}
