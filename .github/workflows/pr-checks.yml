@@ -12,6 +12,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  FRONTEND_DIRECTORY: crates/nefrita-app/frontend
+
 defaults:
   run:
     shell: bash
@@ -66,6 +69,38 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --all-features --locked
 
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ${{ env.FRONTEND_DIRECTORY }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the Node version from package.json
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: ${{ env.FRONTEND_DIRECTORY }}/package.json
+
+      - name: Install the pnpm version from package.json
+        run: npm install --global --ignore-scripts "$(node --print "require('./package.json').packageManager")"
+
+      - name: Install the frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting and lint rules
+        run: pnpm check-format-and-lint
+
+      - name: Check types
+        run: pnpm typecheck
+
+      - name: Build the frontend
+        run: pnpm build
+
+      - name: Audit the dependencies that ship with the app
+        run: pnpm audit --prod
+
   app-build:
     runs-on: ${{ matrix.operating-system }}
     timeout-minutes: 30
@@ -84,6 +119,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends libwebkit2gtk-4.1-dev
+
+      - name: Install the Node version from package.json
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: ${{ env.FRONTEND_DIRECTORY }}/package.json
+
+      - name: Install the pnpm version from package.json
+        working-directory: ${{ env.FRONTEND_DIRECTORY }}
+        run: npm install --global --ignore-scripts "$(node --print "require('./package.json').packageManager")"
+
+      - name: Install the frontend dependencies
+        working-directory: ${{ env.FRONTEND_DIRECTORY }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the frontend
+        working-directory: ${{ env.FRONTEND_DIRECTORY }}
+        run: pnpm build
 
       - name: Build the app in release mode
         run: cargo build --release --locked --package nefrita-app --features tauri/custom-protocol

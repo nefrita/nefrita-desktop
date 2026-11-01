@@ -1,4 +1,4 @@
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
 
 use serde_json::Value;
@@ -12,15 +12,17 @@ const SHORT_REPLY_TIMEOUT: Duration = Duration::from_millis(200);
 const SIMULATED_DEVICE_READ_TIMEOUT: Duration = Duration::from_secs(5);
 const MISSING_PORT_NAME: &str = "/dev/nefrita-missing-serial-port";
 
-static PSEUDO_TERMINAL_PAIR_CREATION: Mutex<()> = Mutex::new(());
+static PSEUDO_TERMINAL_USE: Mutex<()> = Mutex::new(());
+
+fn take_pseudo_terminal_turn() -> MutexGuard<'static, ()> {
+    PSEUDO_TERMINAL_USE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
 
 fn connection_over_pseudo_terminal(reply_timeout: Duration) -> (SerialConnection, TTYPort) {
-    let (mut simulated_device_port, client_port) = {
-        let _pair_creation_turn = PSEUDO_TERMINAL_PAIR_CREATION
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        TTYPort::pair().expect("the system should open a pseudo terminal pair")
-    };
+    let (mut simulated_device_port, client_port) =
+        TTYPort::pair().expect("the system should open a pseudo terminal pair");
     simulated_device_port
         .set_timeout(SIMULATED_DEVICE_READ_TIMEOUT)
         .expect("the simulated device port should accept a timeout");
@@ -61,12 +63,14 @@ fn assert_timeouts(
 
 #[test]
 fn pseudo_terminal_without_control_lines_becomes_a_connection_with_the_reply_timeout() {
+    let _pseudo_terminal_turn = take_pseudo_terminal_turn();
     let (connection, _simulated_device_port) = connection_over_pseudo_terminal(REPLY_TIMEOUT);
     assert_timeouts(&connection, Some(REPLY_TIMEOUT), REPLY_TIMEOUT);
 }
 
 #[test]
 fn request_and_reply_cross_the_serial_connection() {
+    let _pseudo_terminal_turn = take_pseudo_terminal_turn();
     let (connection, mut simulated_device_port) = connection_over_pseudo_terminal(REPLY_TIMEOUT);
     let simulated_device = thread::spawn(move || {
         let client_request = read_client_request(&mut simulated_device_port);
@@ -90,6 +94,7 @@ fn request_and_reply_cross_the_serial_connection() {
 
 #[test]
 fn request_the_device_never_reads_still_times_out() {
+    let _pseudo_terminal_turn = take_pseudo_terminal_turn();
     let (connection, _simulated_device_port) = connection_over_pseudo_terminal(SHORT_REPLY_TIMEOUT);
     let request_attempt = Device::new(connection).request_version_information();
     assert!(
@@ -100,6 +105,7 @@ fn request_the_device_never_reads_still_times_out() {
 
 #[test]
 fn removed_reply_timeout_uses_the_long_port_timeout_until_it_is_restored() {
+    let _pseudo_terminal_turn = take_pseudo_terminal_turn();
     let (mut connection, _simulated_device_port) = connection_over_pseudo_terminal(REPLY_TIMEOUT);
     connection
         .set_reply_timeout(None)

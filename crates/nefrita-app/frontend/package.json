@@ -1,0 +1,35 @@
+{
+  "name": "nefrita-app-frontend",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.28.9",
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "26",
+      "onFail": "error"
+    }
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc && tsc --project tsconfig.node.json",
+    "check-format-and-lint": "biome ci",
+    "fix-format-and-lint": "biome check --write",
+    "tauri": "TAURI_APP_PATH=.. tauri"
+  },
+  "dependencies": {
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.3",
+    "@tauri-apps/cli": "2.12.4",
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "typescript": "7.0.2",
+    "vite": "8.3.5"
+  }
+}

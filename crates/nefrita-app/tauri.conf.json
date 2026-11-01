@@ -2,7 +2,10 @@
   "productName": "Nefrita",
   "identifier": "org.nefrita.desktop",
   "build": {
-    "frontendDist": "static"
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "frontend/dist"
   },
   "app": {
     "withGlobalTauri": false,
