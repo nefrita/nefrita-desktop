@@ -1,0 +1,6 @@
+minimumReleaseAge: 4320
+trustPolicy: no-downgrade
+saveExact: true
+shellEmulator: true
+audit:
+  level: high
