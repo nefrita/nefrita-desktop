@@ -28,7 +28,25 @@ The Rust version is pinned in `rust-toolchain.toml`. Install it once, and again 
 rustup toolchain install
 ```
 
-Then run the same checks as the `format`, `lint`, `test`, `app-build` and `dependencies` jobs of the `PR checks` workflow, from the root of the repository:
+The frontend, in `crates/nefrita-app/frontend`, needs Node and pnpm. Its `package.json` pins Node by its major version, 26, in `devEngines`, and pnpm by its exact version, in `packageManager`; pnpm stops with an error when the Node version does not match. Install Node 26, from [nodejs.org](https://nodejs.org/) or with a version manager, and then pnpm with npm:
+
+```bash
+npm install --global pnpm@11.28.9
+```
+
+When `package.json` changes either version, update it here too.
+
+Then run the same checks as the `PR checks` workflow. First those of the `frontend` job, from `crates/nefrita-app/frontend`:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm check-format-and-lint
+pnpm typecheck
+pnpm build
+pnpm audit --prod
+```
+
+After them, those of the `format`, `lint`, `test`, `app-build` and `dependencies` jobs, from the root of the repository. The release build puts the `frontend/dist` that `pnpm build` wrote inside the app, and fails without it:
 
 ```bash
 cargo fmt --all --check
@@ -42,11 +60,18 @@ cargo deny --locked check
 
 | Check | What it verifies |
 | --- | --- |
+| `pnpm install` | The lockfile matches `package.json`, and pnpm installs exactly the versions it lists |
+| `pnpm check-format-and-lint` | The frontend follows the formatting and lint rules of `biome.json` |
+| `pnpm typecheck` | TypeScript finds no type errors in `src/` or in `vite.config.ts` |
+| `pnpm build` | Vite builds the frontend into `frontend/dist` |
+| `pnpm audit` | No high or critical advisory in the dependencies that ship with the app |
 | `cargo fmt` | The code follows the rustfmt style |
 | `cargo clippy` | No clippy warnings, in any crate or target, with all features and with the default ones |
 | `cargo test` | All tests pass |
-| `cargo build` | The app compiles in release mode, with its page inside the binary, on your system; the CI builds it on Linux, macOS and Windows |
+| `cargo build` | The app compiles in release mode, with the frontend inside the binary, on your system; the CI builds it on Linux, macOS and Windows |
 | `cargo deny` | No dependency with a known vulnerability, unmaintained or yanked, only the licenses allowed in `deny.toml`, and only crates from crates.io |
+
+`pnpm audit --prod` only fails on high or critical advisories (`audit.level` in `pnpm-workspace.yaml`), and only in the dependencies that ship with the app, not in the development tools. When an advisory has a fixed version, `pnpm audit --fix` adds an override to it, and when that version is younger than the 3-day wait of `minimumReleaseAge`, it exempts that version alone in `minimumReleaseAgeExclude`; then `pnpm install` installs it without waiting. When an advisory has no fix yet, `pnpm audit --ignore` with its GHSA ID ignores it. These exceptions stay in `pnpm-workspace.yaml`: review them in the pull request, and remove them once they are no longer needed.
 
 `cargo install` only builds cargo-deny the first time; afterwards it reports that the version is already installed. When the workflow changes the cargo-deny version, update it here too.
 
@@ -54,7 +79,7 @@ cargo deny --locked check
 
 ### Running the Linux jobs with Docker
 
-On a system other than Linux, Docker can run the Linux jobs, `lint`, `test` and the Linux `app-build`, in a clean Ubuntu 24.04 with the same package as the CI. From the root of the repository:
+On a system other than Linux, Docker can run the Linux jobs, `lint`, `test` and the Linux `app-build`, in a clean Ubuntu 24.04 with the same package as the CI. Run the frontend checks first: the container copies the `frontend/dist` that `pnpm build` wrote, which is the same on every system, so it does not need Node. From the root of the repository:
 
 ```bash
 docker run --rm --env DEBIAN_FRONTEND=noninteractive --volume "$PWD":/host/nefrita-desktop:ro \
@@ -65,6 +90,7 @@ docker run --rm --env DEBIAN_FRONTEND=noninteractive --volume "$PWD":/host/nefri
   apt-get install --yes --no-install-recommends libwebkit2gtk-4.1-dev
   mkdir /nefrita-desktop
   tar --exclude=./target --exclude=./.git --exclude=./crates/nefrita-app/gen \
+    --exclude=./crates/nefrita-app/frontend/node_modules \
     -C /host/nefrita-desktop -cf - . | tar -C /nefrita-desktop -xf -
   cd /nefrita-desktop
   curl --proto "=https" --tlsv1.2 --silent --show-error --fail https://sh.rustup.rs \
@@ -79,27 +105,35 @@ docker run --rm --env DEBIAN_FRONTEND=noninteractive --volume "$PWD":/host/nefri
 '
 ```
 
-The container first installs what the GitHub runners already have (certificates, `curl`, a C compiler and `pkg-config`), then `libwebkit2gtk-4.1-dev`. It works on a copy of the repository, so it does not touch your `target/`. Then it installs the pinned Rust version and runs the same commands as the jobs. It stops at the first command that fails, and if a system library is missing, the build error names it. It compiles Tauri three times, so it takes a while.
+The container first installs what the GitHub runners already have (certificates, `curl`, a C compiler and `pkg-config`), then `libwebkit2gtk-4.1-dev`. It works on a copy of the repository without `target/` or the `node_modules` of the frontend, so it does not touch yours. Then it installs the pinned Rust version and runs the same commands as the jobs. It stops at the first command that fails, and if a system library is missing, the build error names it. It compiles Tauri three times, so it takes a while.
 
 The block is for a bash shell and has only been tried on macOS. On Apple silicon, Docker runs Ubuntu for ARM64, while the CI uses x86_64; the package names are the same.
 
 ## Running the app
 
-From the root of the repository:
+The Tauri CLI runs the app in development; `pnpm install` installs it with the frontend. From `crates/nefrita-app/frontend`:
 
 ```bash
-cargo run --package nefrita-app
+pnpm tauri dev
 ```
 
-This opens the app window from a debug build. For now the window shows a placeholder page, and it has no Tauri permissions and no commands of its own. In debug builds, right-clicking the page opens a menu with the web inspector.
+This starts the Vite development server, compiles the app in debug mode and opens its window. A change in the frontend reaches the window right away, through Vite, and a change in Rust makes the CLI rebuild and restart the app; `crates/nefrita-app/.taurignore` keeps the frontend out of what the CLI watches. For now the window shows a placeholder screen, and it has no Tauri permissions and no commands of its own. In debug builds, right-clicking the page opens a menu with the web inspector.
 
-To open it as the `app-build` job compiles it, in release mode and with the page inside the binary:
+In development the page comes from the Vite development server, with the content security policy of `vite.config.ts`: Tauri only applies the one in `tauri.conf.json` to the pages it serves itself. A plain `cargo run --package nefrita-app` also loads the page from `http://localhost:5173`, so it only shows it while the Vite development server is running.
+
+To open the app with the frontend inside the binary and the release content security policy, but still with the web inspector, run `pnpm build` and then, from the root of the repository:
+
+```bash
+cargo run --package nefrita-app --features tauri/custom-protocol
+```
+
+To open it as the `app-build` job compiles it, in release mode:
 
 ```bash
 cargo run --release --package nefrita-app --features tauri/custom-protocol
 ```
 
-`tauri/custom-protocol` is the feature that the Tauri CLI adds to its release builds; until the app uses the CLI, cargo needs it explicitly.
+`tauri/custom-protocol` is the feature that the Tauri CLI adds to its release builds, and cargo needs it explicitly. Both commands use the `frontend/dist` of the last `pnpm build`, so run it again after changing the frontend.
 
 ## Integration tests
 
@@ -293,6 +327,6 @@ rm -rf "$HOME/.nefrita-tor-test"
 
 ## Continuous integration
 
-`PR checks` (`.github/workflows/pr-checks.yml`) runs on every pull request to `main`, and on demand with "Run workflow". It has one job per check above, `format`, `lint`, `test`, `app-build` and `dependencies`, and `device-integration` for the integration tests. On Linux, `lint`, `test` and `app-build` first install `libwebkit2gtk-4.1-dev`, without its recommended packages. `app-build` compiles the app in release mode on Linux x86_64, macOS ARM64 and Windows x86_64, one job per system, and a failure on one system does not cancel the others. `device-integration` builds `libjade_daemon` with XBT and the PIN server image from the firmware commit in `FIRMWARE_COMMIT`, caches both per commit, generates a new key pair for the custom PIN server on every run, and runs the integration tests against `libjade_daemon` and the two PIN servers. If it fails, the job shows the output of `libjade_daemon` and of each PIN server.
+`PR checks` (`.github/workflows/pr-checks.yml`) runs on every pull request to `main`, and on demand with "Run workflow". It has one job for the frontend checks above, `frontend`; one job per Rust check, `format`, `lint`, `test`, `app-build` and `dependencies`; and `device-integration` for the integration tests. `frontend` and `app-build` install Node in the version of `package.json` with `actions/setup-node`, and pnpm with npm, in the version of `packageManager`. On Linux, `lint`, `test` and `app-build` first install `libwebkit2gtk-4.1-dev`, without its recommended packages. `app-build` builds the frontend and compiles the app in release mode on Linux x86_64, macOS ARM64 and Windows x86_64, one job per system, and a failure on one system does not cancel the others. `device-integration` builds `libjade_daemon` with XBT and the PIN server image from the firmware commit in `FIRMWARE_COMMIT`, caches both per commit, generates a new key pair for the custom PIN server on every run, and runs the integration tests against `libjade_daemon` and the two PIN servers. If it fails, the job shows the output of `libjade_daemon` and of each PIN server.
 
 The workflow only uses actions created by GitHub, and its token can only read the repository; `device-integration` logs in to Docker Hub with the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets to pull the builder image and the Debian base image of the PIN server.
