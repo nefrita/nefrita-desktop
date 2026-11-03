@@ -45,6 +45,7 @@ ignore = true
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+allow-wildcard-paths = true
 skip = [
     { crate = "base64:0.21", reason = "swift-rs, which tauri-utils uses on macOS" },
     { crate = "bitflags:1", reason = "nix 0.26 of serialport, and WebKitGTK of the GTK3 stack that Tauri 2 uses on Linux" },

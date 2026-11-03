@@ -10,6 +10,19 @@
 
 Each domain of a crate lives in its own folder, with a `mod.rs` that declares its modules and what they export. The unit tests of a module go in their own `tests.rs`: `message.rs` declares `#[cfg(test)] mod tests;`, and its tests live in `message/tests.rs`. A file, code or tests, should stay around 300 lines at most; when one gets close, look for a second responsibility and move it to its own file.
 
+The frontend, in `crates/nefrita-app/frontend/src`, is organized by view. Each view has its own folder, named in PascalCase like its components, with an `index.ts` that exports them; its tests go in `__tests__/`, in files ending in `.test.tsx`, and its hooks and translations, when it has them, in `hooks/` and `locales/`. A view with several sections has a subfolder per section, laid out the same way. Inside a view, files import each other directly, and the rest of the app imports the view through its `index.ts`. The typed calls to the commands of the app live in `commands/`, one module per Rust domain, because several views can share them. The root of `src/` keeps what belongs to the whole app (`main.tsx`, `App.tsx` and `styles.css`) and `bindings/`, the TypeScript types that `cargo test` generates from Rust. For example, `DeviceConnection/` holds `BoardPortList.tsx`, its `index.ts` and `__tests__/BoardPortList.test.tsx`, and `commands/boardPorts.ts` holds the call that searches the board ports.
+
+### Adding a command
+
+A command is a Rust function that the frontend calls through the Tauri IPC. `search_board_ports`, which lists the connected boards, shows each step; the paths are inside `crates/nefrita-app/`:
+
+1. Write it in the module of its domain, with `#[tauri::command]`, as in `src/board_ports/mod.rs`, and add it to `tauri::generate_handler!` in `src/main.rs`.
+2. Add its name to `AppManifest::commands` in `build.rs`. From that list, `tauri-build` generates two permissions per command, `allow-<command>` and `deny-<command>`, with the underscores turned into dashes; a command missing from the list has no permission to give.
+3. Allow it in `capabilities/main-window.json`: `allow-search-board-ports` lets the main window call `search_board_ports`, and Tauri rejects the calls of any command without its permission.
+4. Derive `ts_rs::TS` on the types it takes and returns, only for the tests: `#[cfg_attr(test, derive(ts_rs::TS), ts(export))]`. `cargo test` writes them into `frontend/src/bindings/`, following their serde attributes. Commit them with the command: the `test` job fails if, after its tests, they differ from the ones in the repository.
+5. Write its typed call in `frontend/src/commands/`, in the module of its domain: a function that calls `invoke` from `@tauri-apps/api/core` with the name of the command and returns the types of `frontend/src/bindings/`, as `searchBoardPorts` does in `frontend/src/commands/boardPorts.ts`.
+6. Test it in Rust, in the `tests.rs` of its domain, and in the frontend, in the `__tests__/` of the view that uses it. There, `mockIPC` from `@tauri-apps/api/mocks` answers in place of the command, and `clearMocks()` removes the mock after each test.
+
 ## Local checks
 
 The app crate, `nefrita-app`, is built on Tauri, which uses the web view of each system, so clippy, the tests and the release build need what this table lists for each system to compile it:
@@ -18,7 +31,7 @@ The app crate, `nefrita-app`, is built on Tauri, which uses the web view of each
 | --- | --- |
 | Debian and Ubuntu | `sudo apt-get update`, then `sudo apt-get install --no-install-recommends build-essential pkg-config libwebkit2gtk-4.1-dev` |
 | macOS | The Xcode Command Line Tools: `xcode-select --install` |
-| Windows | The Microsoft C++ Build Tools, with the "Desktop development with C++" workload, and WebView2, which comes with Windows 10 from version 1803 and with later versions |
+| Windows | The Microsoft C++ Build Tools, with the "Desktop development with C++" workload, and WebView2, which comes with Windows 10 from version 1803 and with later versions. On x86_64, aws-lc-sys, the cryptography library under the TLS of the device crate, also needs NASM or its prebuilt objects: set `AWS_LC_SYS_PREBUILT_NASM=1` in the shell that runs cargo, as the CI does (in PowerShell, `$env:AWS_LC_SYS_PREBUILT_NASM = "1"`), or install NASM |
 
 The Linux commands install the same package as the CI, plus the C compiler and `pkg-config` that the GitHub runners already have; they were tested on Ubuntu 24.04 with the Docker block below. On other distributions, the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) give the name of the WebKitGTK development package; their list also has packages that the build does not use.
 
@@ -42,11 +55,12 @@ Then run the same checks as the `PR checks` workflow. First those of the `fronte
 pnpm install --frozen-lockfile
 pnpm check-format-and-lint
 pnpm typecheck
+pnpm test
 pnpm build
 pnpm audit --prod
 ```
 
-After them, those of the `format`, `lint`, `test`, `app-build` and `dependencies` jobs, from the root of the repository. The release build puts the `frontend/dist` that `pnpm build` wrote inside the app, and fails without it:
+The release build puts the `frontend/dist` that `pnpm build` wrote inside the app, and fails without it, so these go after the frontend checks: those of the `format`, `lint`, `test` and `app-build` jobs, from the root of the repository:
 
 ```bash
 cargo fmt --all --check
@@ -54,6 +68,11 @@ cargo clippy --workspace --all-targets --all-features --locked -- --deny warning
 cargo clippy --workspace --all-targets --locked -- --deny warnings
 cargo test --workspace --all-features --locked
 cargo build --release --locked --package nefrita-app --features tauri/custom-protocol
+```
+
+Then those of the `dependencies` job, from the root of the repository, the `nefrita-desktop` folder. `cargo deny` only looks for `Cargo.toml` in the folder where it runs, so from `crates/nefrita-app/frontend`, where the frontend checks leave you, go back to the root first with `cd ../../..`:
+
+```bash
 cargo install --locked cargo-deny --version 0.20.2
 cargo deny --locked check
 ```
@@ -63,11 +82,12 @@ cargo deny --locked check
 | `pnpm install` | The lockfile matches `package.json`, and pnpm installs exactly the versions it lists |
 | `pnpm check-format-and-lint` | The frontend follows the formatting and lint rules of `biome.json` |
 | `pnpm typecheck` | TypeScript finds no type errors in `src/` or in `vite.config.ts` |
+| `pnpm test` | The frontend tests pass, in jsdom, with `mockIPC` answering in place of the commands |
 | `pnpm build` | Vite builds the frontend into `frontend/dist` |
 | `pnpm audit` | No high or critical advisory in the dependencies that ship with the app |
 | `cargo fmt` | The code follows the rustfmt style |
 | `cargo clippy` | No clippy warnings, in any crate or target, with all features and with the default ones |
-| `cargo test` | All tests pass |
+| `cargo test` | All tests pass, and the TypeScript types they write into `frontend/src/bindings` are the ones in the repository: if git shows them changed, commit them with your Rust change |
 | `cargo build` | The app compiles in release mode, with the frontend inside the binary, on your system; the CI builds it on Linux, macOS and Windows |
 | `cargo deny` | No dependency with a known vulnerability, unmaintained or yanked, only the licenses allowed in `deny.toml`, and only crates from crates.io |
 
@@ -105,7 +125,7 @@ docker run --rm --env DEBIAN_FRONTEND=noninteractive --volume "$PWD":/host/nefri
 '
 ```
 
-The container first installs what the GitHub runners already have (certificates, `curl`, a C compiler and `pkg-config`), then `libwebkit2gtk-4.1-dev`. It works on a copy of the repository without `target/` or the `node_modules` of the frontend, so it does not touch yours. Then it installs the pinned Rust version and runs the same commands as the jobs. It stops at the first command that fails, and if a system library is missing, the build error names it. It compiles Tauri three times, so it takes a while.
+The container first installs what the GitHub runners already have (certificates, `curl`, a C compiler and `pkg-config`), then `libwebkit2gtk-4.1-dev`. It works on a copy of the repository without `target/` or the `node_modules` of the frontend, so it does not touch yours. Then it installs the pinned Rust version and runs the same commands as the jobs, except the `test` job's check of the TypeScript types, which needs git: the `cargo test` of your system covers it. It stops at the first command that fails, and if a system library is missing, the build error names it. It compiles Tauri three times, so it takes a while.
 
 The block is for a bash shell and has only been tried on macOS. On Apple silicon, Docker runs Ubuntu for ARM64, while the CI uses x86_64; the package names are the same.
 
@@ -117,7 +137,7 @@ The Tauri CLI runs the app in development; `pnpm install` installs it with the f
 pnpm tauri dev
 ```
 
-This starts the Vite development server, compiles the app in debug mode and opens its window. A change in the frontend reaches the window right away, through Vite, and a change in Rust makes the CLI rebuild and restart the app; `crates/nefrita-app/.taurignore` keeps the frontend out of what the CLI watches. For now the window shows a placeholder screen, and it has no Tauri permissions and no commands of its own. In debug builds, right-clicking the page opens a menu with the web inspector.
+This starts the Vite development server, compiles the app in debug mode and opens its window. A change in the frontend reaches the window right away, through Vite, and a change in Rust makes the CLI rebuild and restart the app; `crates/nefrita-app/.taurignore` keeps the frontend out of what the CLI watches. The window lists the boards connected by USB, with their port, chip, product and serial number, and a button searches again. The app has one command of its own, `search_board_ports`, and `crates/nefrita-app/capabilities/main-window.json` gives the main window that command alone, with no permission of the Tauri core. In debug builds, right-clicking the page opens a menu with the web inspector.
 
 In development the page comes from the Vite development server, with the content security policy of `vite.config.ts`: Tauri only applies the one in `tauri.conf.json` to the pages it serves itself. A plain `cargo run --package nefrita-app` also loads the page from `http://localhost:5173`, so it only shows it while the Vite development server is running.
 
@@ -205,7 +225,7 @@ If a test fails, `docker logs` with the name of a container (`libjade-daemon`, `
 
 ## Manual tests with a board
 
-The example program `crates/nefrita-device/examples/unlock_over_usb.rs` talks to a real board over USB, the way the app will: it finds the board, checks that its firmware is XBT, prints its version and state, and unlocks it through the PIN server. Until the app has its screens, it is the manual test of the USB connection.
+The example program `crates/nefrita-device/examples/unlock_over_usb.rs` talks to a real board over USB, the way the app will: it finds the board, checks that its firmware is XBT, prints its version and state, and unlocks it through the PIN server. Until the app connects to the board, it is the manual test of the USB connection.
 
 ### What you need
 
@@ -327,6 +347,6 @@ rm -rf "$HOME/.nefrita-tor-test"
 
 ## Continuous integration
 
-`PR checks` (`.github/workflows/pr-checks.yml`) runs on every pull request to `main`, and on demand with "Run workflow". It has one job for the frontend checks above, `frontend`; one job per Rust check, `format`, `lint`, `test`, `app-build` and `dependencies`; and `device-integration` for the integration tests. `frontend` and `app-build` install Node in the version of `package.json` with `actions/setup-node`, and pnpm with npm, in the version of `packageManager`. On Linux, `lint`, `test` and `app-build` first install `libwebkit2gtk-4.1-dev`, without its recommended packages. `app-build` builds the frontend and compiles the app in release mode on Linux x86_64, macOS ARM64 and Windows x86_64, one job per system, and a failure on one system does not cancel the others. `device-integration` builds `libjade_daemon` with XBT and the PIN server image from the firmware commit in `FIRMWARE_COMMIT`, caches both per commit, generates a new key pair for the custom PIN server on every run, and runs the integration tests against `libjade_daemon` and the two PIN servers. If it fails, the job shows the output of `libjade_daemon` and of each PIN server.
+`PR checks` (`.github/workflows/pr-checks.yml`) runs on every pull request to `main`, and on demand with "Run workflow". It has one job for the frontend checks above, tests included, `frontend`; one job per Rust check, `format`, `lint`, `test`, `app-build` and `dependencies`; and `device-integration` for the integration tests. `frontend` and `app-build` install Node in the version of `package.json` with `actions/setup-node`, and pnpm with npm, in the version of `packageManager`. On Linux, `lint`, `test` and `app-build` first install `libwebkit2gtk-4.1-dev`, without its recommended packages. After its tests, `test` fails if they changed the TypeScript types in `frontend/src/bindings`, that is, if the types in the repository are not the ones Rust generates. `app-build` builds the frontend and compiles the app in release mode on Linux x86_64, macOS ARM64 and Windows x86_64, one job per system, and a failure on one system does not cancel the others; it sets `AWS_LC_SYS_PREBUILT_NASM`, so that on Windows aws-lc-sys uses its prebuilt NASM objects. `device-integration` builds `libjade_daemon` with XBT and the PIN server image from the firmware commit in `FIRMWARE_COMMIT`, caches both per commit, generates a new key pair for the custom PIN server on every run, and runs the integration tests against `libjade_daemon` and the two PIN servers. If it fails, the job shows the output of `libjade_daemon` and of each PIN server.
 
 The workflow only uses actions created by GitHub, and its token can only read the repository; `device-integration` logs in to Docker Hub with the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets to pull the builder image and the Debian base image of the PIN server.

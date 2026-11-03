@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import createReactPlugins from "@vitejs/plugin-react";
-import { defineConfig, type Plugin } from "vite";
+import type { Plugin } from "vite";
+import { defineConfig } from "vitest/config";
 
 const developmentServerPort = 5173;
 
@@ -19,7 +20,7 @@ const developmentContentSecurityPolicy = [
   "default-src 'self'",
   `script-src 'self' 'sha256-${reactRefreshPreambleHash}'`,
   "style-src 'self' 'unsafe-inline'",
-  `connect-src 'self' ws://localhost:${developmentServerPort}`,
+  `connect-src 'self' ws://localhost:${developmentServerPort} ipc: http://ipc.localhost`,
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
@@ -52,5 +53,8 @@ export default defineConfig({
   },
   build: {
     assetsInlineLimit: 0,
+  },
+  test: {
+    environment: "jsdom",
   },
 });

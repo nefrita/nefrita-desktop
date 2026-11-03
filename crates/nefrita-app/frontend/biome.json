@@ -1,6 +1,6 @@
 {
   "files": {
-    "includes": ["**", "!dist", "!pnpm-lock.yaml"]
+    "includes": ["**", "!dist", "!pnpm-lock.yaml", "!src/bindings"]
   },
   "formatter": {
     "indentStyle": "space",

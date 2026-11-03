@@ -69,6 +69,11 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --all-features --locked
 
+      - name: Check that the TypeScript bindings match the Rust types
+        run: |
+          git status --porcelain -- "$FRONTEND_DIRECTORY/src/bindings"
+          test -z "$(git status --porcelain -- "$FRONTEND_DIRECTORY/src/bindings")"
+
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -94,6 +99,9 @@ jobs:
 
       - name: Check types
         run: pnpm typecheck
+
+      - name: Run the frontend tests
+        run: pnpm test
 
       - name: Build the frontend
         run: pnpm build
@@ -138,6 +146,8 @@ jobs:
         run: pnpm build
 
       - name: Build the app in release mode
+        env:
+          AWS_LC_SYS_PREBUILT_NASM: 1
         run: cargo build --release --locked --package nefrita-app --features tauri/custom-protocol
 
   dependencies:
