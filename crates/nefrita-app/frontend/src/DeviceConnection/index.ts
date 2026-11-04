@@ -1,1 +1,1 @@
-export { BoardPortList } from "./BoardPortList";
+export { DeviceConnection } from "./DeviceConnection";

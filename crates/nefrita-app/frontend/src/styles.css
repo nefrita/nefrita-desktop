@@ -24,3 +24,13 @@ li {
   display: grid;
   margin-block: 0.75rem;
 }
+
+dl {
+  display: grid;
+  gap: 0.25rem 1rem;
+  grid-template-columns: auto 1fr;
+}
+
+dd {
+  margin: 0;
+}
