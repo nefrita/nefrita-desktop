@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import type { BoardPort } from "../bindings/BoardPort";
-import type { BoardPortSearchError } from "../bindings/BoardPortSearchError";
-import { searchBoardPorts } from "../commands/boardPorts";
+import type { BoardPort } from "../../bindings/BoardPort";
+import type { BoardPortSearchError } from "../../bindings/BoardPortSearchError";
+import { searchBoardPorts } from "../../commands/boardPorts";
 
 type BoardPortSearch =
   | { stage: "searching" }
@@ -19,7 +19,7 @@ function isBoardPortSearchError(searchFailure: unknown): searchFailure is BoardP
   return typeof searchFailure === "string" && Object.hasOwn(searchErrorMessages, searchFailure);
 }
 
-export function BoardPortList() {
+export function BoardPortList({ onConnect }: { onConnect: (portName: string) => void }) {
   const [boardPortSearch, setBoardPortSearch] = useState<BoardPortSearch>({ stage: "searching" });
 
   const startBoardPortSearch = useCallback(async () => {
@@ -43,8 +43,8 @@ export function BoardPortList() {
 
   return (
     <section>
-      <h2>Connected boards</h2>
-      <BoardPortSearchOutcome boardPortSearch={boardPortSearch} />
+      <h2>Plugged-in boards</h2>
+      <BoardPortSearchOutcome boardPortSearch={boardPortSearch} onConnect={onConnect} />
       <button
         type="button"
         onClick={startBoardPortSearch}
@@ -56,7 +56,13 @@ export function BoardPortList() {
   );
 }
 
-function BoardPortSearchOutcome({ boardPortSearch }: { boardPortSearch: BoardPortSearch }) {
+function BoardPortSearchOutcome({
+  boardPortSearch,
+  onConnect,
+}: {
+  boardPortSearch: BoardPortSearch;
+  onConnect: (portName: string) => void;
+}) {
   switch (boardPortSearch.stage) {
     case "searching":
       return <p>Searching for boards…</p>;
@@ -64,7 +70,7 @@ function BoardPortSearchOutcome({ boardPortSearch }: { boardPortSearch: BoardPor
       return <p role="alert">{boardPortSearch.failureMessage}</p>;
     case "found":
       if (boardPortSearch.boardPorts.length === 0) {
-        return <p>No board found. Connect one with a USB cable that carries data.</p>;
+        return <p>No board found. Plug one in with a USB cable that carries data.</p>;
       }
       return (
         <ul>
@@ -76,6 +82,13 @@ function BoardPortSearchOutcome({ boardPortSearch }: { boardPortSearch: BoardPor
               {boardPort.serialNumber !== null && (
                 <span>Serial number {boardPort.serialNumber}</span>
               )}
+              <button
+                type="button"
+                aria-label={`Connect ${boardPort.portName}`}
+                onClick={() => onConnect(boardPort.portName)}
+              >
+                Connect
+              </button>
             </li>
           ))}
         </ul>
