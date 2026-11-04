@@ -1,5 +1,9 @@
 {
   "identifier": "main-window",
   "windows": ["main"],
-  "permissions": ["allow-search-board-ports"]
+  "permissions": [
+    "allow-search-board-ports",
+    "allow-connect-device",
+    "allow-disconnect-device"
+  ]
 }
