@@ -275,3 +275,9 @@ fn connection_errors_serialize_as_their_codes() {
         );
     }
 }
+
+#[test]
+fn empty_slot_lends_no_stored_device() {
+    let empty_slot = ConnectedDeviceSlot::default();
+    assert_eq!(empty_slot.with_stored_device(|_| ()), None);
+}

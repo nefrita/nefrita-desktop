@@ -95,6 +95,13 @@ impl ConnectedDeviceSlot {
         *self.lock_stored_device() = None;
     }
 
+    pub fn with_stored_device<DeviceUseOutcome>(
+        &self,
+        use_stored_device: impl FnOnce(&mut Device<SerialConnection>) -> DeviceUseOutcome,
+    ) -> Option<DeviceUseOutcome> {
+        self.lock_stored_device().as_mut().map(use_stored_device)
+    }
+
     fn lock_stored_device(&self) -> MutexGuard<'_, Option<Device<SerialConnection>>> {
         self.stored_device
             .lock()
