@@ -10,18 +10,18 @@
 
 Each domain of a crate lives in its own folder, with a `mod.rs` that declares its modules and what they export. The unit tests of a module go in their own `tests.rs`: `message.rs` declares `#[cfg(test)] mod tests;`, and its tests live in `message/tests.rs`. A file, code or tests, should stay around 300 lines at most; when one gets close, look for a second responsibility and move it to its own file.
 
-The frontend, in `crates/nefrita-app/frontend/src`, is organized by view. Each view has its own folder, named in PascalCase like its components, with an `index.ts` that exports them; its tests go in `__tests__/`, in files ending in `.test.tsx`, and its hooks and translations, when it has them, in `hooks/` and `locales/`. A view with several sections has a subfolder per section, laid out the same way. Inside a view, files import each other directly, and the rest of the app imports the view through its `index.ts`. The typed calls to the commands of the app live in `commands/`, one module per Rust domain, because several views can share them. The root of `src/` keeps what belongs to the whole app (`main.tsx`, `App.tsx` and `styles.css`) and `bindings/`, the TypeScript types that `cargo test` generates from Rust. For example, `DeviceConnection/` holds `BoardPortList.tsx`, its `index.ts` and `__tests__/BoardPortList.test.tsx`, and `commands/boardPorts.ts` holds the call that searches the board ports.
+The frontend, in `crates/nefrita-app/frontend/src`, is organized by view. Each view has its own folder, named in PascalCase like its components, with an `index.ts` that exports them; its tests go in `__tests__/`, in files ending in `.test.tsx`, and its hooks and translations, when it has them, in `hooks/` and `locales/`. A view with several sections has a subfolder per section, laid out the same way. Inside a view, files import each other directly, and the rest of the app imports the view through its `index.ts`; a view imports each of its sections the same way, through the section's `index.ts`. The typed calls to the commands of the app live in `commands/`, one module per Rust domain, because several views can share them. The root of `src/` keeps what belongs to the whole app (`main.tsx`, `App.tsx` and `styles.css`) and `bindings/`, the TypeScript types that `cargo test` generates from Rust. For example, `DeviceConnection/` holds `DeviceConnection.tsx`, its `index.ts` and `__tests__/DeviceConnection.test.tsx`, and a subfolder for each of its two sections, `BoardPortList/` and `ConnectedDeviceDetails/`, each with its component, its `index.ts` and its `__tests__/`; and `commands/boardPorts.ts` and `commands/deviceConnection.ts` hold the calls of the `board_ports` and `device_connection` modules of Rust.
 
 ### Adding a command
 
-A command is a Rust function that the frontend calls through the Tauri IPC. `search_board_ports`, which lists the connected boards, shows each step; the paths are inside `crates/nefrita-app/`:
+A command is a Rust function that the frontend calls through the Tauri IPC. `search_board_ports`, which lists the plugged-in boards, shows each step; the paths are inside `crates/nefrita-app/`:
 
-1. Write it in the module of its domain, with `#[tauri::command]`, as in `src/board_ports/mod.rs`, and add it to `tauri::generate_handler!` in `src/main.rs`.
-2. Add its name to `AppManifest::commands` in `build.rs`. From that list, `tauri-build` generates two permissions per command, `allow-<command>` and `deny-<command>`, with the underscores turned into dashes; a command missing from the list has no permission to give.
+1. Write it in the module of its domain, with `#[tauri::command]`, as in `src/board_ports/mod.rs`, and add it to `tauri::generate_handler!` in `src/main.rs`. If it keeps state between calls, as `connect_device` keeps the open connection in `ConnectedDeviceSlot`, register that state with `manage` in `src/main.rs`; the command takes an `AppHandle` and reads the state with `state()`, from `tauri::Manager`, as `connect_device` does inside `tauri::async_runtime::spawn_blocking`.
+2. Add its name to `COMMAND_NAMES` in `build.rs`, the list that goes to `AppManifest::commands`. From that list, `tauri-build` generates two permissions per command, `allow-<command>` and `deny-<command>`, with the underscores turned into dashes; a command missing from the list has no permission to give.
 3. Allow it in `capabilities/main-window.json`: `allow-search-board-ports` lets the main window call `search_board_ports`, and Tauri rejects the calls of any command without its permission.
 4. Derive `ts_rs::TS` on the types it takes and returns, only for the tests: `#[cfg_attr(test, derive(ts_rs::TS), ts(export))]`. `cargo test` writes them into `frontend/src/bindings/`, following their serde attributes. Commit them with the command: the `test` job fails if, after its tests, they differ from the ones in the repository.
 5. Write its typed call in `frontend/src/commands/`, in the module of its domain: a function that calls `invoke` from `@tauri-apps/api/core` with the name of the command and returns the types of `frontend/src/bindings/`, as `searchBoardPorts` does in `frontend/src/commands/boardPorts.ts`.
-6. Test it in Rust, in the `tests.rs` of its domain, and in the frontend, in the `__tests__/` of the view that uses it. There, `mockIPC` from `@tauri-apps/api/mocks` answers in place of the command, and `clearMocks()` removes the mock after each test.
+6. Test it in Rust, in the `tests.rs` of its domain, and in the frontend, in the `__tests__/` of the view or section that uses it. There, `mockIPC` from `@tauri-apps/api/mocks` answers in place of the command, and `clearMocks()` removes the mock after each test.
 
 ## Local checks
 
@@ -137,7 +137,7 @@ The Tauri CLI runs the app in development; `pnpm install` installs it with the f
 pnpm tauri dev
 ```
 
-This starts the Vite development server, compiles the app in debug mode and opens its window. A change in the frontend reaches the window right away, through Vite, and a change in Rust makes the CLI rebuild and restart the app; `crates/nefrita-app/.taurignore` keeps the frontend out of what the CLI watches. The window lists the boards connected by USB, with their port, chip, product and serial number, and a button searches again. The app has one command of its own, `search_board_ports`, and `crates/nefrita-app/capabilities/main-window.json` gives the main window that command alone, with no permission of the Tauri core. In debug builds, right-clicking the page opens a menu with the web inspector.
+This starts the Vite development server, compiles the app in debug mode and opens its window. A change in the frontend reaches the window right away, through Vite, and a change in Rust makes the CLI rebuild and restart the app; `crates/nefrita-app/.taurignore` keeps the frontend out of what the CLI watches. The window opens on a welcome, and "Connect a board" lists the boards plugged in by USB, with their port, chip, product and serial number; a button searches again. "Connect" on a board makes the app list the boards again and open its port only if it is still on the list; then the app checks that the firmware is XBT and shows the firmware version, the board type and the state. "Disconnect" closes the port and goes back to the list. While a board is connected, the window checks every 2 seconds that its port is still on the list, and when the board is unplugged, it goes back to the list and says so. The app has three commands of its own, `search_board_ports`, `connect_device` and `disconnect_device`, and `crates/nefrita-app/capabilities/main-window.json` gives the main window those three alone, with no permission of the Tauri core. In debug builds, right-clicking the page opens a menu with the web inspector.
 
 In development the page comes from the Vite development server, with the content security policy of `vite.config.ts`: Tauri only applies the one in `tauri.conf.json` to the pages it serves itself. A plain `cargo run --package nefrita-app` also loads the page from `http://localhost:5173`, so it only shows it while the Vite development server is running.
 
@@ -153,7 +153,7 @@ To open it as the `app-build` job compiles it, in release mode:
 cargo run --release --package nefrita-app --features tauri/custom-protocol
 ```
 
-`tauri/custom-protocol` is the feature that the Tauri CLI adds to its release builds, and cargo needs it explicitly. Both commands use the `frontend/dist` of the last `pnpm build`, so run it again after changing the frontend.
+`tauri/custom-protocol` is the feature that the Tauri CLI adds to its release builds, and cargo needs it explicitly. Without it, even a release build loads the page from the Vite development server, and the window stays blank when that server is not running. Both commands use the `frontend/dist` of the last `pnpm build`, so run it again after changing the frontend.
 
 ## Integration tests
 
@@ -225,11 +225,11 @@ If a test fails, `docker logs` with the name of a container (`libjade-daemon`, `
 
 ## Manual tests with a board
 
-The example program `crates/nefrita-device/examples/unlock_over_usb.rs` talks to a real board over USB, the way the app will: it finds the board, checks that its firmware is XBT, prints its version and state, and unlocks it through the PIN server. Until the app connects to the board, it is the manual test of the USB connection.
+The example program `crates/nefrita-device/examples/unlock_over_usb.rs` talks to a real board over USB without the app: it finds the board, checks that its firmware is XBT, prints its version and state, and unlocks it through the PIN server. It is a development tool: it tests `nefrita-device` on its own, which tells whether a failure comes from the crate or from the app; it connects, with `--port`, to a board whose chip is not on the list, which the app does not do; and until the app unlocks a board, it is the manual test of the unlock, and until the app uses Tor, of the unlock through Tor.
 
 ### What you need
 
-- A board from the [DIY list of Jade](https://github.com/Sharmaz/Jade/blob/master/diy/README.md) with the XBT development firmware, connected with a USB cable that carries data. Build the firmware with the "XBT firmware builds" block of the [firmware guide](https://github.com/Sharmaz/Jade/blob/master/CONTRIBUTING.md), with the profile and the chip of your board as the only entry of its loop, for example `display_ttgo_tdisplay:esp32`; the profiles are the `configs/sdkconfig_*.defaults` files of the firmware. The firmware CI only builds XBT for the T-Display and the M5StickC Plus2, so the other boards of the list have not been tried with XBT yet. Then flash it from the `build/` directory of the firmware repository with `esptool` 4.12.0, the version in the builder image. Install it in a Python virtual environment, because the Python of Homebrew does not let pip install packages outside one; the Tor test below uses the same environment:
+- A board from the [DIY list of Jade](https://github.com/Sharmaz/Jade/blob/master/diy/README.md) with the XBT development firmware, plugged in with a USB cable that carries data. Build the firmware with the "XBT firmware builds" block of the [firmware guide](https://github.com/Sharmaz/Jade/blob/master/CONTRIBUTING.md), with the profile and the chip of your board as the only entry of its loop, for example `display_ttgo_tdisplay:esp32`; the profiles are the `configs/sdkconfig_*.defaults` files of the firmware. The firmware CI only builds XBT for the T-Display and the M5StickC Plus2, so the other boards of the list have not been tried with XBT yet. Then flash it from the `build/` directory of the firmware repository with `esptool` 4.12.0, the version in the builder image. Install it in a Python virtual environment, because the Python of Homebrew does not let pip install packages outside one; the Tor test below uses the same environment:
 
   ```bash
   python3 -m venv ~/.venvs/nefrita-board-tools
@@ -339,7 +339,7 @@ rm -rf "$HOME/.nefrita-tor-test"
 ### When it does not work
 
 - **No board found while the board is on:** the cable or the hub port may only charge. On macOS, `ioreg -p IOUSB -w 0` shows whether the system sees the board at all.
-- **The connection fails:** only one program can have the port open, so close serial monitors such as `idf.py monitor` first.
+- **The connection fails:** another program may have the port open, for example a serial monitor such as `idf.py monitor`; close it first.
 - **`the device firmware is not XBT`:** the board runs other firmware; flash the XBT development firmware.
 - **The unlock fails at the PIN server:** check that the server is running and that it uses the volume where the PIN of that board was created.
 - **`the device offers no onion PIN server URL to use through Tor`:** the board has no onion URL yet; give it one as in "Unlocking through Tor".
