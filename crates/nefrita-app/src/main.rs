@@ -2,6 +2,7 @@
 
 mod board_ports;
 mod device_connection;
+mod device_unlock;
 
 use std::process::ExitCode;
 
@@ -12,6 +13,8 @@ fn main() -> ExitCode {
             board_ports::search_board_ports,
             device_connection::connect_device,
             device_connection::disconnect_device,
+            device_unlock::unlock_device,
+            device_unlock::logout_device,
         ])
         .run(tauri::generate_context!())
     {

@@ -1,6 +1,12 @@
 use tauri_build::{AppManifest, Attributes};
 
-const COMMAND_NAMES: &[&str] = &["search_board_ports", "connect_device", "disconnect_device"];
+const COMMAND_NAMES: &[&str] = &[
+    "search_board_ports",
+    "connect_device",
+    "disconnect_device",
+    "unlock_device",
+    "logout_device",
+];
 
 fn main() {
     let build_attributes =
