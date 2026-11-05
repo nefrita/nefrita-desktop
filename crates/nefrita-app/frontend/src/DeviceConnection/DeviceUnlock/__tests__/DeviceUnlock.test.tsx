@@ -16,9 +16,15 @@ const temporaryWalletNotice =
 const eraseConfirmation =
   "Logging out erases this temporary wallet. To use it again, you have to enter its recovery phrase on the board.";
 
+const possiblyTemporaryWalletLogoutConfirmation =
+  "If this wallet is temporary, logging out erases it. To use it again, you have to enter its recovery phrase on the board.";
+
 const unlockedSavedWallet: UnlockAttempt = { outcome: "unlocked", deviceState: "ready" };
 
-const unlockedTemporaryWallet: UnlockAttempt = { outcome: "unlocked", deviceState: "temporary" };
+const unlockedTemporaryWallet: UnlockAttempt = {
+  outcome: "unlocked",
+  deviceState: "temporary-unlocked",
+};
 
 const deviceStatesWithoutASavedWallet: ConnectedDeviceState[] = ["uninitialized", "unsaved"];
 
@@ -102,9 +108,8 @@ function pressUnlock() {
   fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
 }
 
-async function unlockAndAskToLogOut() {
-  pressUnlock();
-  fireEvent.click(await screen.findByRole("button", { name: "Log out" }));
+function pressLogOut() {
+  fireEvent.click(screen.getByRole("button", { name: "Log out" }));
 }
 
 afterEach(() => {
@@ -202,42 +207,59 @@ test("shows a general message and logs the cause for an unknown unlock failure",
   );
 });
 
-test("unlocks a temporary wallet without asking for the PIN and offers to log out", async () => {
+test("unlocks a temporary wallet without asking for the PIN", async () => {
+  const onDeviceStateChange = vi.fn();
   mockUnlockCommands({ answerUnlock: () => Promise.resolve(unlockedTemporaryWallet) });
-  renderDeviceUnlock({ deviceState: "temporary" });
+  renderDeviceUnlock({ deviceState: "temporary", onDeviceStateChange });
   expect(screen.getByText(temporaryWalletNotice)).toBeTruthy();
   pressUnlock();
   expect(screen.getByText("Unlocking…")).toBeTruthy();
-  expect(await screen.findByRole("button", { name: "Log out" })).toBeTruthy();
+  await waitFor(() => expect(onDeviceStateChange).toHaveBeenCalledWith("temporary-unlocked"));
 });
 
-test("erases the temporary wallet only after the erase is confirmed", async () => {
+test("erases an unlocked temporary wallet only after the erase is confirmed", async () => {
   const answerLogout = vi.fn(() => Promise.resolve<ConnectedDeviceState>("uninitialized"));
-  mockUnlockCommands({
-    answerUnlock: () => Promise.resolve(unlockedTemporaryWallet),
-    answerLogout,
-  });
+  mockUnlockCommands({ answerLogout });
   const onDeviceStateChange = vi.fn();
-  renderDeviceUnlock({ deviceState: "temporary", onDeviceStateChange });
-  await unlockAndAskToLogOut();
+  renderDeviceUnlock({ deviceState: "temporary-unlocked", onDeviceStateChange });
+  expect(screen.getByText(temporaryWalletNotice)).toBeTruthy();
+  pressLogOut();
   expect(screen.getByText(eraseConfirmation)).toBeTruthy();
   expect(answerLogout).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Erase the wallet" }));
-  await waitFor(() => expect(onDeviceStateChange).toHaveBeenLastCalledWith("uninitialized"));
+  await waitFor(() => expect(onDeviceStateChange).toHaveBeenCalledWith("uninitialized"));
   expect(answerLogout).toHaveBeenCalledOnce();
 });
 
-test("keeps the temporary wallet when the erase is not confirmed", async () => {
+test("keeps the unlocked temporary wallet when the erase is not confirmed", () => {
   const answerLogout = vi.fn(() => Promise.resolve<ConnectedDeviceState>("uninitialized"));
-  mockUnlockCommands({
-    answerUnlock: () => Promise.resolve(unlockedTemporaryWallet),
-    answerLogout,
-  });
-  renderDeviceUnlock({ deviceState: "temporary" });
-  await unlockAndAskToLogOut();
+  mockUnlockCommands({ answerLogout });
+  renderDeviceUnlock({ deviceState: "temporary-unlocked" });
+  pressLogOut();
   fireEvent.click(screen.getByRole("button", { name: "Keep the wallet" }));
   expect(screen.getByRole("button", { name: "Log out" })).toBeTruthy();
   expect(screen.queryByText(eraseConfirmation)).toBeNull();
+  expect(answerLogout).not.toHaveBeenCalled();
+});
+
+test("logs out a wallet that may be temporary once the logout is confirmed", async () => {
+  const onDeviceStateChange = vi.fn();
+  mockUnlockCommands();
+  renderDeviceUnlock({ deviceState: "unlocked-possibly-temporary", onDeviceStateChange });
+  pressLogOut();
+  expect(screen.getByText(possiblyTemporaryWalletLogoutConfirmation)).toBeTruthy();
+  pressLogOut();
+  await waitFor(() => expect(onDeviceStateChange).toHaveBeenCalledWith("locked"));
+});
+
+test("keeps a wallet that may be temporary when the logout is cancelled", () => {
+  const answerLogout = vi.fn(() => Promise.resolve<ConnectedDeviceState>("locked"));
+  mockUnlockCommands({ answerLogout });
+  renderDeviceUnlock({ deviceState: "unlocked-possibly-temporary" });
+  pressLogOut();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.getByRole("button", { name: "Log out" })).toBeTruthy();
+  expect(screen.queryByText(possiblyTemporaryWalletLogoutConfirmation)).toBeNull();
   expect(answerLogout).not.toHaveBeenCalled();
 });
 
@@ -245,9 +267,10 @@ test("locks an unlocked saved wallet without asking to confirm", async () => {
   const onDeviceStateChange = vi.fn();
   mockUnlockCommands();
   renderDeviceUnlock({ deviceState: "ready", onDeviceStateChange });
-  fireEvent.click(screen.getByRole("button", { name: "Log out" }));
+  pressLogOut();
   await waitFor(() => expect(onDeviceStateChange).toHaveBeenCalledWith("locked"));
   expect(screen.queryByText(eraseConfirmation)).toBeNull();
+  expect(screen.queryByText(possiblyTemporaryWalletLogoutConfirmation)).toBeNull();
 });
 
 test("shows a general message and logs the cause for an unknown logout failure", async () => {
@@ -256,7 +279,7 @@ test("shows a general message and logs the cause for an unknown logout failure",
     answerLogout: () => Promise.reject("Command logout_device not allowed by ACL"),
   });
   renderDeviceUnlock({ deviceState: "ready" });
-  fireEvent.click(screen.getByRole("button", { name: "Log out" }));
+  pressLogOut();
   const failureParagraph = await screen.findByRole("alert");
   expect(failureParagraph.textContent).toBe("The board could not be logged out.");
   expect(consoleErrorSpy).toHaveBeenCalledWith(

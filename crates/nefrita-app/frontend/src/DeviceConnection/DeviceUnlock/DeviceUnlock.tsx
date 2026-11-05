@@ -8,10 +8,16 @@ import { logoutDevice, unlockDevice } from "../../commands/deviceUnlock";
 type WalletSessionProgress =
   | { stage: "idle"; failureMessage: string | null }
   | { stage: "unlocking"; stepText: string }
-  | { stage: "confirming-erase" }
+  | { stage: "confirming-logout" }
   | { stage: "logging-out" };
 
 const idleWithoutFailure: WalletSessionProgress = { stage: "idle", failureMessage: null };
+
+const unlockedDeviceStates: ConnectedDeviceState[] = [
+  "ready",
+  "temporary-unlocked",
+  "unlocked-possibly-temporary",
+];
 
 const pinEntryText = "Enter your PIN on the board.";
 
@@ -33,6 +39,9 @@ const temporaryWalletNotice =
 
 const eraseConfirmation =
   "Logging out erases this temporary wallet. To use it again, you have to enter its recovery phrase on the board.";
+
+const possiblyTemporaryWalletLogoutConfirmation =
+  "If this wallet is temporary, logging out erases it. To use it again, you have to enter its recovery phrase on the board.";
 
 const noSavedWalletMessage = "This board has no saved wallet yet.";
 
@@ -91,9 +100,8 @@ export function DeviceUnlock({
 }) {
   const [walletSessionProgress, setWalletSessionProgress] =
     useState<WalletSessionProgress>(idleWithoutFailure);
-  const [temporaryWalletUnlocked, setTemporaryWalletUnlocked] = useState(false);
-  const walletUnlocked =
-    deviceState === "ready" || (deviceState === "temporary" && temporaryWalletUnlocked);
+  const walletUnlocked = unlockedDeviceStates.includes(deviceState);
+  const hasTemporaryWallet = deviceState === "temporary" || deviceState === "temporary-unlocked";
   const withoutASavedWallet = deviceState === "uninitialized" || deviceState === "unsaved";
 
   async function unlock() {
@@ -103,9 +111,6 @@ export function DeviceUnlock({
     try {
       const unlockAttempt = await unlockDevice((unlockStep) =>
         setWalletSessionProgress({ stage: "unlocking", stepText: unlockStepTexts[unlockStep] }),
-      );
-      setTemporaryWalletUnlocked(
-        unlockAttempt.outcome === "unlocked" && unlockAttempt.deviceState === "temporary",
       );
       setWalletSessionProgress({
         stage: "idle",
@@ -126,7 +131,6 @@ export function DeviceUnlock({
     setWalletSessionProgress({ stage: "logging-out" });
     try {
       const deviceStateAfterLogout = await logoutDevice();
-      setTemporaryWalletUnlocked(false);
       setWalletSessionProgress(idleWithoutFailure);
       onDeviceStateChange(deviceStateAfterLogout);
     } catch (logoutFailure) {
@@ -138,11 +142,15 @@ export function DeviceUnlock({
   }
 
   function askToLogOut() {
-    if (deviceState === "temporary") {
-      setWalletSessionProgress({ stage: "confirming-erase" });
-    } else {
+    if (deviceState === "ready") {
       logOut();
+    } else {
+      setWalletSessionProgress({ stage: "confirming-logout" });
     }
+  }
+
+  function cancelLogout() {
+    setWalletSessionProgress(idleWithoutFailure);
   }
 
   function walletSessionStage() {
@@ -159,15 +167,25 @@ export function DeviceUnlock({
         );
       case "unlocking":
         return <p>{walletSessionProgress.stepText}</p>;
-      case "confirming-erase":
-        return (
+      case "confirming-logout":
+        return deviceState === "temporary-unlocked" ? (
           <>
             <p>{eraseConfirmation}</p>
             <button type="button" onClick={logOut}>
               Erase the wallet
             </button>
-            <button type="button" onClick={() => setWalletSessionProgress(idleWithoutFailure)}>
+            <button type="button" onClick={cancelLogout}>
               Keep the wallet
+            </button>
+          </>
+        ) : (
+          <>
+            <p>{possiblyTemporaryWalletLogoutConfirmation}</p>
+            <button type="button" onClick={logOut}>
+              Log out
+            </button>
+            <button type="button" onClick={cancelLogout}>
+              Cancel
             </button>
           </>
         );
@@ -185,7 +203,7 @@ export function DeviceUnlock({
       {walletSessionProgress.stage === "idle" && walletSessionProgress.failureMessage !== null && (
         <p role="alert">{walletSessionProgress.failureMessage}</p>
       )}
-      {deviceState === "temporary" && <p>{temporaryWalletNotice}</p>}
+      {hasTemporaryWallet && <p>{temporaryWalletNotice}</p>}
       {withoutASavedWallet ? <p>{noSavedWalletMessage}</p> : walletSessionStage()}
     </>
   );
