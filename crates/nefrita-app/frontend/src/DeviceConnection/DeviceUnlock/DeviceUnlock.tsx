@@ -20,9 +20,11 @@ const temporaryWalletUnlockText = "Unlocking…";
 const unlockStepTexts: Record<UnlockStep, string> = {
   "pin-server-exchange": "Contacting the PIN server…",
   "pin-server-reply-check": "The board is checking the answer of the PIN server…",
+  "refused-pin": "The board refused the PIN. Press continue on the board.",
 };
 
-const pinRefusedMessage = "The board refused the PIN. It shows how many attempts are left.";
+const pinRefusedMessage =
+  "The board refused the PIN. It shows how many attempts are left when you unlock it again.";
 
 const walletErasedMessage = "The board refused the PIN three times in a row and erased its wallet.";
 

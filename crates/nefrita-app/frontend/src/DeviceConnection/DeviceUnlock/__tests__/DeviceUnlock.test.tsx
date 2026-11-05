@@ -23,7 +23,10 @@ const unlockedTemporaryWallet: UnlockAttempt = { outcome: "unlocked", deviceStat
 const deviceStatesWithoutASavedWallet: ConnectedDeviceState[] = ["uninitialized", "unsaved"];
 
 const messagesByStateAfterRefusal: [ConnectedDeviceState, string][] = [
-  ["locked", "The board refused the PIN. It shows how many attempts are left."],
+  [
+    "locked",
+    "The board refused the PIN. It shows how many attempts are left when you unlock it again.",
+  ],
   ["uninitialized", "The board refused the PIN three times in a row and erased its wallet."],
 ];
 
@@ -148,6 +151,29 @@ test.each(messagesByStateAfterRefusal)(
     expect(onDeviceStateChange).toHaveBeenCalledWith(stateAfterRefusal);
   },
 );
+
+test("asks to press continue while the board shows the refused PIN", async () => {
+  let reportUnlockStep: (unlockStep: UnlockStep) => void = () => undefined;
+  let finishUnlock: (unlockAttempt: UnlockAttempt) => void = () => undefined;
+  mockUnlockCommands({
+    answerUnlock: (unlockStepChannel) => {
+      reportUnlockStep = unlockStepChannel.onmessage;
+      return new Promise<UnlockAttempt>((resolveUnlock) => {
+        finishUnlock = resolveUnlock;
+      });
+    },
+  });
+  renderDeviceUnlock();
+  pressUnlock();
+  await screen.findByText("Enter your PIN on the board.");
+  act(() => reportUnlockStep("refused-pin"));
+  expect(screen.getByText("The board refused the PIN. Press continue on the board.")).toBeTruthy();
+  finishUnlock({ outcome: "refused", deviceState: "locked" });
+  const failureParagraph = await screen.findByRole("alert");
+  expect(failureParagraph.textContent).toBe(
+    "The board refused the PIN. It shows how many attempts are left when you unlock it again.",
+  );
+});
 
 test.each(messagesByUnlockError)(
   "explains the %s failure and offers to unlock again",
