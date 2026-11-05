@@ -29,6 +29,8 @@ const labelsByDeviceState: [ConnectedDeviceState, string][] = [
   ["locked", "Locked"],
   ["ready", "Unlocked"],
   ["temporary", "Temporary wallet"],
+  ["temporary-unlocked", "Temporary wallet, unlocked"],
+  ["unlocked-possibly-temporary", "Unlocked"],
 ];
 
 function mockBoardPortSearch(answerSearch: () => Promise<BoardPort[]>) {

@@ -12,6 +12,8 @@ const deviceStateLabels: Record<ConnectedDeviceState, string> = {
   locked: "Locked",
   ready: "Unlocked",
   temporary: "Temporary wallet",
+  "temporary-unlocked": "Temporary wallet, unlocked",
+  "unlocked-possibly-temporary": "Unlocked",
 };
 
 export function ConnectedDeviceDetails({
