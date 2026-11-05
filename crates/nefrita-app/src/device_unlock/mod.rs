@@ -1,6 +1,6 @@
 use nefrita_device::{
     Device, DeviceError, ErrorReplyKind, HttpPinServer, Network, PinServer, PinServerError,
-    PinServerPayload, PinServerRequest, SerialConnection, UnlockOutcome,
+    PinServerPayload, PinServerRequest, SerialConnection, UnlockOutcome, VersionInformation,
 };
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -16,6 +16,7 @@ const UNLOCK_NETWORK: Network = Network::XbtTestnet4;
 pub enum UnlockStep {
     PinServerExchange,
     PinServerReplyCheck,
+    RefusedPin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -116,11 +117,19 @@ impl From<UnlockOutcome> for UnlockAttemptOutcome {
 
 fn attempt_unlock(
     stored_device: &mut Device<SerialConnection>,
-    report_unlock_step: impl FnMut(UnlockStep),
+    mut report_unlock_step: impl FnMut(UnlockStep),
 ) -> Result<UnlockAttempt, DeviceUnlockError> {
+    let attempt_outcome = unlock_reporting_steps(stored_device, &mut report_unlock_step)?;
+    let device_state = match attempt_outcome {
+        UnlockAttemptOutcome::Unlocked => read_device_state(stored_device)?,
+        UnlockAttemptOutcome::Refused => {
+            report_unlock_step(UnlockStep::RefusedPin);
+            wait_for_device_state(stored_device)?
+        }
+    };
     Ok(UnlockAttempt {
-        outcome: unlock_reporting_steps(stored_device, report_unlock_step)?,
-        device_state: read_device_state(stored_device)?,
+        outcome: attempt_outcome,
+        device_state,
     })
 }
 
@@ -150,8 +159,22 @@ fn device_state_after_logout(
 fn read_device_state(
     stored_device: &mut Device<SerialConnection>,
 ) -> Result<ConnectedDeviceState, DeviceUnlockError> {
-    stored_device
-        .require_xbt_firmware()
+    device_state_from_version_request(stored_device.require_xbt_firmware())
+}
+
+fn wait_for_device_state(
+    stored_device: &mut Device<SerialConnection>,
+) -> Result<ConnectedDeviceState, DeviceUnlockError> {
+    device_state_from_version_request(
+        stored_device
+            .run_without_reply_timeout(|stored_device| stored_device.require_xbt_firmware()),
+    )
+}
+
+fn device_state_from_version_request(
+    version_request_attempt: Result<VersionInformation, DeviceError>,
+) -> Result<ConnectedDeviceState, DeviceUnlockError> {
+    version_request_attempt
         .map(|version_information| version_information.device_state.into())
         .map_err(|version_request_failure| {
             unlock_error_from_device_failure(&version_request_failure)

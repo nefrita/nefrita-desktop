@@ -301,6 +301,7 @@ fn unlock_steps_serialize_as_their_names() {
     let names_by_unlock_step = [
         (UnlockStep::PinServerExchange, "pin-server-exchange"),
         (UnlockStep::PinServerReplyCheck, "pin-server-reply-check"),
+        (UnlockStep::RefusedPin, "refused-pin"),
     ];
     for (unlock_step, expected_name) in names_by_unlock_step {
         assert_eq!(
