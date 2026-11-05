@@ -61,18 +61,7 @@ impl<Connection: DeviceConnection> Device<Connection> {
         pin_server: &mut impl PinServer,
     ) -> Result<UnlockOutcome, DeviceError> {
         self.require_xbt_firmware()?;
-        let normal_reply_timeout = self
-            .connection
-            .reply_timeout()
-            .map_err(DeviceError::ConnectionFailed)?;
-        self.connection
-            .set_reply_timeout(None)
-            .map_err(DeviceError::ConnectionFailed)?;
-        let unlock_attempt = self.authenticate(network, pin_server);
-        let reply_timeout_restoration = self.connection.set_reply_timeout(normal_reply_timeout);
-        let unlock_outcome = unlock_attempt?;
-        reply_timeout_restoration.map_err(DeviceError::ConnectionFailed)?;
-        Ok(unlock_outcome)
+        self.run_without_reply_timeout(|device| device.authenticate(network, pin_server))
     }
 
     pub fn logout(&mut self) -> Result<(), DeviceError> {
