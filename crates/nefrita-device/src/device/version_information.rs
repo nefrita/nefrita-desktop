@@ -31,6 +31,8 @@ pub struct VersionInformation {
     pub device_state: DeviceState,
     #[serde(rename = "JADE_CHAIN")]
     pub chain: Option<String>,
+    #[serde(rename = "NEFRITA_HAS_TEMPORARY_WALLET")]
+    pub has_temporary_wallet: Option<bool>,
 }
 
 impl<Connection: DeviceConnection> Device<Connection> {

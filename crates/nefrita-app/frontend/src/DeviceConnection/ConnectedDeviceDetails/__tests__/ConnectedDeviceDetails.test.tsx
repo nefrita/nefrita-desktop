@@ -1,22 +1,23 @@
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { BoardPort } from "../../../bindings/BoardPort";
 import type { ConnectedDevice } from "../../../bindings/ConnectedDevice";
 import type { ConnectedDeviceState } from "../../../bindings/ConnectedDeviceState";
-import { ConnectedDeviceDetails } from "../ConnectedDeviceDetails";
+import type { UnlockAttempt } from "../../../bindings/UnlockAttempt";
+import { ConnectedDeviceDetails, portCheckIntervalMilliseconds } from "../ConnectedDeviceDetails";
 
-const portCheckIntervalMilliseconds = 2000;
+const portName = "/dev/cu.usbserial-0001";
 
 const cp210xBoardPort: BoardPort = {
-  portName: "/dev/cu.usbserial-0001",
+  portName,
   chipName: "CP210x",
   productName: null,
   serialNumber: null,
 };
 
 const lockedDevice: ConnectedDevice = {
-  portName: "/dev/cu.usbserial-0001",
+  portName,
   firmwareVersion: "1.0.36",
   boardType: "M5StickCPlus2",
   deviceState: "locked",
@@ -28,6 +29,8 @@ const labelsByDeviceState: [ConnectedDeviceState, string][] = [
   ["locked", "Locked"],
   ["ready", "Unlocked"],
   ["temporary", "Temporary wallet"],
+  ["temporary-unlocked", "Temporary wallet, unlocked"],
+  ["unlocked-possibly-temporary", "Unlocked"],
 ];
 
 function mockBoardPortSearch(answerSearch: () => Promise<BoardPort[]>) {
@@ -53,6 +56,7 @@ function renderConnectedDeviceDetails({
       connectedDevice={connectedDevice}
       onDisconnect={onDisconnect}
       onUnplugged={onUnplugged}
+      onDeviceStateChange={() => undefined}
     />,
   );
 }
@@ -71,7 +75,7 @@ afterEach(() => {
 test("shows the port, firmware version and board type of the board", () => {
   mockBoardPortSearch(() => Promise.resolve([cp210xBoardPort]));
   renderConnectedDeviceDetails();
-  expect(screen.getByText("/dev/cu.usbserial-0001")).toBeTruthy();
+  expect(screen.getByText(portName)).toBeTruthy();
   expect(screen.getByText("1.0.36")).toBeTruthy();
   expect(screen.getByText("M5StickCPlus2")).toBeTruthy();
 });
@@ -136,4 +140,24 @@ test("reports the unplugged board only once when an earlier check answers late",
   answerFirstCheck([]);
   await vi.advanceTimersByTimeAsync(0);
   expect(onUnplugged).toHaveBeenCalledOnce();
+});
+
+test("hides the disconnect button while the board unlocks and shows it again afterwards", async () => {
+  mockIPC((commandName) => {
+    switch (commandName) {
+      case "search_board_ports":
+        return Promise.resolve([cp210xBoardPort]);
+      case "unlock_device":
+        return Promise.resolve<UnlockAttempt>({ outcome: "unlocked", deviceState: "ready" });
+      default:
+        return Promise.reject(`unexpected command ${commandName}`);
+    }
+  });
+  renderConnectedDeviceDetails();
+  fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+  expect(screen.queryByRole("button", { name: "Disconnect" })).toBeNull();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
 });

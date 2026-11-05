@@ -35,6 +35,8 @@ pub enum ConnectedDeviceState {
     Locked,
     Ready,
     Temporary,
+    TemporaryUnlocked,
+    UnlockedPossiblyTemporary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -95,6 +97,13 @@ impl ConnectedDeviceSlot {
         *self.lock_stored_device() = None;
     }
 
+    pub fn with_stored_device<DeviceUseOutcome>(
+        &self,
+        use_stored_device: impl FnOnce(&mut Device<SerialConnection>) -> DeviceUseOutcome,
+    ) -> Option<DeviceUseOutcome> {
+        self.lock_stored_device().as_mut().map(use_stored_device)
+    }
+
     fn lock_stored_device(&self) -> MutexGuard<'_, Option<Device<SerialConnection>>> {
         self.stored_device
             .lock()
@@ -107,23 +116,29 @@ impl ConnectedDevice {
         port_name: String,
         version_information: VersionInformation,
     ) -> Self {
+        let device_state = ConnectedDeviceState::from(&version_information);
         Self {
             port_name,
             firmware_version: version_information.firmware_version,
             board_type: version_information.board_type,
-            device_state: version_information.device_state.into(),
+            device_state,
         }
     }
 }
 
-impl From<DeviceState> for ConnectedDeviceState {
-    fn from(device_state: DeviceState) -> Self {
-        match device_state {
-            DeviceState::Uninitialized => Self::Uninitialized,
-            DeviceState::Unsaved => Self::Unsaved,
-            DeviceState::Locked => Self::Locked,
-            DeviceState::Ready => Self::Ready,
-            DeviceState::Temporary => Self::Temporary,
+impl From<&VersionInformation> for ConnectedDeviceState {
+    fn from(version_information: &VersionInformation) -> Self {
+        match (
+            version_information.device_state,
+            version_information.has_temporary_wallet,
+        ) {
+            (DeviceState::Uninitialized, _) => Self::Uninitialized,
+            (DeviceState::Unsaved, _) => Self::Unsaved,
+            (DeviceState::Locked, _) => Self::Locked,
+            (DeviceState::Ready, Some(false)) => Self::Ready,
+            (DeviceState::Ready, Some(true)) => Self::TemporaryUnlocked,
+            (DeviceState::Ready, None) => Self::UnlockedPossiblyTemporary,
+            (DeviceState::Temporary, _) => Self::Temporary,
         }
     }
 }

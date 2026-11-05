@@ -4,6 +4,8 @@
   "permissions": [
     "allow-search-board-ports",
     "allow-connect-device",
-    "allow-disconnect-device"
+    "allow-disconnect-device",
+    "allow-unlock-device",
+    "allow-logout-device"
   ]
 }

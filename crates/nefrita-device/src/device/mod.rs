@@ -34,6 +34,24 @@ impl<Connection: DeviceConnection> Device<Connection> {
         }
     }
 
+    pub fn run_without_reply_timeout<DeviceUseOutcome>(
+        &mut self,
+        use_device: impl FnOnce(&mut Self) -> Result<DeviceUseOutcome, DeviceError>,
+    ) -> Result<DeviceUseOutcome, DeviceError> {
+        let normal_reply_timeout = self
+            .connection
+            .reply_timeout()
+            .map_err(DeviceError::ConnectionFailed)?;
+        self.connection
+            .set_reply_timeout(None)
+            .map_err(DeviceError::ConnectionFailed)?;
+        let device_use_attempt = use_device(self);
+        let reply_timeout_restoration = self.connection.set_reply_timeout(normal_reply_timeout);
+        let device_use_outcome = device_use_attempt?;
+        reply_timeout_restoration.map_err(DeviceError::ConnectionFailed)?;
+        Ok(device_use_outcome)
+    }
+
     fn send_request<Parameters: Serialize, MethodResult: DeserializeOwned>(
         &mut self,
         method_name: &str,
