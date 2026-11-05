@@ -175,7 +175,7 @@ fn device_state_from_version_request(
     version_request_attempt: Result<VersionInformation, DeviceError>,
 ) -> Result<ConnectedDeviceState, DeviceUnlockError> {
     version_request_attempt
-        .map(|version_information| version_information.device_state.into())
+        .map(|version_information| ConnectedDeviceState::from(&version_information))
         .map_err(|version_request_failure| {
             unlock_error_from_device_failure(&version_request_failure)
         })

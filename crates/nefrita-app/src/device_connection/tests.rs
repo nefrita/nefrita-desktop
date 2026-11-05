@@ -30,6 +30,7 @@ fn xbt_version_information(device_state: DeviceState) -> VersionInformation {
         board_type: BOARD_TYPE.to_owned(),
         device_state,
         chain: Some("XBT".to_owned()),
+        has_temporary_wallet: None,
     }
 }
 
@@ -55,19 +56,44 @@ fn version_information_becomes_the_connected_device_with_its_port_name() {
 }
 
 #[test]
-fn each_device_state_becomes_its_connected_device_state() {
-    let connected_device_states_by_device_state = [
+fn each_reported_state_becomes_its_connected_device_state() {
+    let connected_device_states_by_reported_state = [
         (
             DeviceState::Uninitialized,
+            None,
             ConnectedDeviceState::Uninitialized,
         ),
-        (DeviceState::Unsaved, ConnectedDeviceState::Unsaved),
-        (DeviceState::Locked, ConnectedDeviceState::Locked),
-        (DeviceState::Ready, ConnectedDeviceState::Ready),
-        (DeviceState::Temporary, ConnectedDeviceState::Temporary),
+        (DeviceState::Unsaved, None, ConnectedDeviceState::Unsaved),
+        (DeviceState::Locked, None, ConnectedDeviceState::Locked),
+        (DeviceState::Ready, Some(false), ConnectedDeviceState::Ready),
+        (
+            DeviceState::Ready,
+            Some(true),
+            ConnectedDeviceState::TemporaryUnlocked,
+        ),
+        (
+            DeviceState::Ready,
+            None,
+            ConnectedDeviceState::UnlockedPossiblyTemporary,
+        ),
+        (
+            DeviceState::Temporary,
+            Some(true),
+            ConnectedDeviceState::Temporary,
+        ),
     ];
-    for (device_state, expected_state) in connected_device_states_by_device_state {
-        assert_eq!(ConnectedDeviceState::from(device_state), expected_state);
+    for (device_state, has_temporary_wallet, expected_state) in
+        connected_device_states_by_reported_state
+    {
+        let version_information = VersionInformation {
+            has_temporary_wallet,
+            ..xbt_version_information(device_state)
+        };
+        assert_eq!(
+            ConnectedDeviceState::from(&version_information),
+            expected_state,
+            "{device_state:?}, has a temporary wallet: {has_temporary_wallet:?}"
+        );
     }
 }
 
@@ -96,6 +122,14 @@ fn connected_device_states_serialize_as_their_names() {
         (ConnectedDeviceState::Locked, "locked"),
         (ConnectedDeviceState::Ready, "ready"),
         (ConnectedDeviceState::Temporary, "temporary"),
+        (
+            ConnectedDeviceState::TemporaryUnlocked,
+            "temporary-unlocked",
+        ),
+        (
+            ConnectedDeviceState::UnlockedPossiblyTemporary,
+            "unlocked-possibly-temporary",
+        ),
     ];
     for (connected_device_state, expected_name) in names_by_connected_device_state {
         assert_eq!(
