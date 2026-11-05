@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import type { ConnectedDevice } from "../bindings/ConnectedDevice";
+import type { ConnectedDeviceState } from "../bindings/ConnectedDeviceState";
 import type { DeviceConnectionError } from "../bindings/DeviceConnectionError";
 import { connectDevice, disconnectDevice } from "../commands/deviceConnection";
 import { BoardPortList } from "./BoardPortList";
@@ -84,6 +85,18 @@ export function DeviceConnection() {
     [disconnectAndChooseAgain],
   );
 
+  function updateConnectedDeviceState(deviceState: ConnectedDeviceState) {
+    setConnectionProgress((currentConnectionProgress) => {
+      if (currentConnectionProgress.stage !== "connected") {
+        return currentConnectionProgress;
+      }
+      return {
+        stage: "connected",
+        connectedDevice: { ...currentConnectionProgress.connectedDevice, deviceState },
+      };
+    });
+  }
+
   switch (connectionProgress.stage) {
     case "choosing":
       return (
@@ -102,6 +115,7 @@ export function DeviceConnection() {
           connectedDevice={connectionProgress.connectedDevice}
           onDisconnect={() => disconnectAndChooseAgain(null)}
           onUnplugged={disconnectAfterUnplugging}
+          onDeviceStateChange={updateConnectedDeviceState}
         />
       );
   }

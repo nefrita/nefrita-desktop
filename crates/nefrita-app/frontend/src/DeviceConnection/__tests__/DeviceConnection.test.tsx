@@ -4,23 +4,27 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { BoardPort } from "../../bindings/BoardPort";
 import type { ConnectedDevice } from "../../bindings/ConnectedDevice";
 import type { DeviceConnectionError } from "../../bindings/DeviceConnectionError";
+import type { UnlockAttempt } from "../../bindings/UnlockAttempt";
+import { portCheckIntervalMilliseconds } from "../ConnectedDeviceDetails/ConnectedDeviceDetails";
 import { DeviceConnection } from "../DeviceConnection";
 
-const portCheckIntervalMilliseconds = 2000;
+const portName = "/dev/cu.usbserial-0001";
 
 const cp210xBoardPort: BoardPort = {
-  portName: "/dev/cu.usbserial-0001",
+  portName,
   chipName: "CP210x",
   productName: null,
   serialNumber: null,
 };
 
 const lockedDevice: ConnectedDevice = {
-  portName: "/dev/cu.usbserial-0001",
+  portName,
   firmwareVersion: "1.0.36",
   boardType: "M5StickCPlus2",
   deviceState: "locked",
 };
+
+const unlockedSavedWallet: UnlockAttempt = { outcome: "unlocked", deviceState: "ready" };
 
 const messagesByConnectionError: [DeviceConnectionError, string][] = [
   ["port-enumeration-failed", "The system could not list its serial ports."],
@@ -61,6 +65,8 @@ function mockDeviceCommands({
         return answerConnection(commandArguments);
       case "disconnect_device":
         return answerDisconnection();
+      case "unlock_device":
+        return Promise.resolve(unlockedSavedWallet);
       default:
         return Promise.reject(`unexpected command ${commandName}`);
     }
@@ -68,7 +74,7 @@ function mockDeviceCommands({
 }
 
 async function chooseTheListedBoard() {
-  fireEvent.click(await screen.findByRole("button", { name: "Connect /dev/cu.usbserial-0001" }));
+  fireEvent.click(await screen.findByRole("button", { name: `Connect ${portName}` }));
 }
 
 afterEach(() => {
@@ -84,14 +90,14 @@ test("connects the board chosen in the list and shows its details", async () => 
   render(<DeviceConnection />);
   await chooseTheListedBoard();
   expect(await screen.findByText("1.0.36")).toBeTruthy();
-  expect(answerConnection).toHaveBeenCalledWith({ portName: "/dev/cu.usbserial-0001" });
+  expect(answerConnection).toHaveBeenCalledWith({ portName });
 });
 
 test("shows that it is connecting until the board answers", async () => {
   mockDeviceCommands({ answerConnection: () => new Promise<ConnectedDevice>(() => undefined) });
   render(<DeviceConnection />);
   await chooseTheListedBoard();
-  expect(screen.getByText("Connecting to /dev/cu.usbserial-0001…")).toBeTruthy();
+  expect(screen.getByText(`Connecting to ${portName}…`)).toBeTruthy();
 });
 
 test.each(messagesByConnectionError)(
@@ -102,9 +108,7 @@ test.each(messagesByConnectionError)(
     await chooseTheListedBoard();
     const failureParagraph = await screen.findByRole("alert");
     expect(failureParagraph.textContent).toBe(expectedMessage);
-    expect(
-      await screen.findByRole("button", { name: "Connect /dev/cu.usbserial-0001" }),
-    ).toBeTruthy();
+    expect(await screen.findByRole("button", { name: `Connect ${portName}` })).toBeTruthy();
   },
 );
 
@@ -145,9 +149,7 @@ test("disconnects the board and shows the list again", async () => {
   render(<DeviceConnection />);
   await chooseTheListedBoard();
   fireEvent.click(await screen.findByRole("button", { name: "Disconnect" }));
-  expect(
-    await screen.findByRole("button", { name: "Connect /dev/cu.usbserial-0001" }),
-  ).toBeTruthy();
+  expect(await screen.findByRole("button", { name: `Connect ${portName}` })).toBeTruthy();
   expect(answerDisconnection).toHaveBeenCalledOnce();
   expect(screen.queryByRole("alert")).toBeNull();
 });
@@ -178,4 +180,12 @@ test("disconnects and warns when the board is unplugged", async () => {
   const failureParagraph = await screen.findByRole("alert");
   expect(failureParagraph.textContent).toBe("The board was unplugged.");
   expect(answerDisconnection).toHaveBeenCalledOnce();
+});
+
+test("shows the state that the board reports after unlocking", async () => {
+  mockDeviceCommands();
+  render(<DeviceConnection />);
+  await chooseTheListedBoard();
+  fireEvent.click(await screen.findByRole("button", { name: "Unlock" }));
+  expect(await screen.findByText("Unlocked")).toBeTruthy();
 });
