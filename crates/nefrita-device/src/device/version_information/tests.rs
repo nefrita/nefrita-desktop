@@ -17,12 +17,32 @@ fn version_information_is_requested_and_decoded() {
             board_type: "M5_STICKC_PLUS_2".to_owned(),
             device_state: DeviceState::Locked,
             chain: Some("XBT".to_owned()),
+            has_temporary_wallet: None,
         }
     );
     assert_eq!(
         device.connection().written_messages(),
         vec![json!({"id": "1", "method": "get_version_info"})]
     );
+}
+
+#[test]
+fn has_temporary_wallet_is_decoded_when_the_firmware_reports_it() {
+    let encoded_reply = encode_cbor_message(&json!({
+        "id": "1",
+        "result": {
+            "JADE_VERSION": "1.0.41",
+            "BOARD_TYPE": "M5_STICKC_PLUS_2",
+            "JADE_STATE": "READY",
+            "JADE_CHAIN": "XBT",
+            "NEFRITA_HAS_TEMPORARY_WALLET": true,
+        },
+    }));
+    let mut device = device_replying_with(vec![encoded_reply]);
+    let version_information = device
+        .request_version_information()
+        .expect("the version information should be decoded");
+    assert_eq!(version_information.has_temporary_wallet, Some(true));
 }
 
 #[test]
