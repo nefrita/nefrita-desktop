@@ -232,13 +232,6 @@ fn version_request_failures_become_their_error_codes() {
             DeviceConnectionError::DeviceNotRecognized,
         ),
         (
-            DeviceError::UnexpectedReplyIdentifier {
-                expected: "1".to_owned(),
-                received: "7".to_owned(),
-            },
-            DeviceConnectionError::DeviceNotRecognized,
-        ),
-        (
             DeviceError::ReplyWithoutResult,
             DeviceConnectionError::DeviceNotRecognized,
         ),

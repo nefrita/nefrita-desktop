@@ -12,7 +12,6 @@ pub enum DeviceError {
     ReplyTimedOut,
     RequestEncodingFailed(String),
     MalformedMessage(String),
-    UnexpectedReplyIdentifier { expected: String, received: String },
     ReplyWithoutResult,
     Rejected(ErrorReply),
     NotXbtFirmware { chain: Option<String> },
@@ -44,10 +43,6 @@ impl fmt::Display for DeviceError {
                     "the device sent a malformed message: {decoding_error_description}"
                 )
             }
-            Self::UnexpectedReplyIdentifier { expected, received } => write!(
-                formatter,
-                "the device replied to request {received} while request {expected} was waiting"
-            ),
             Self::ReplyWithoutResult => {
                 write!(
                     formatter,

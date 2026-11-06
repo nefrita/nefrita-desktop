@@ -173,13 +173,6 @@ fn device_failures_become_their_unlock_errors() {
             DeviceUnlockError::DeviceNotRecognized,
         ),
         (
-            DeviceError::UnexpectedReplyIdentifier {
-                expected: "1".to_owned(),
-                received: "7".to_owned(),
-            },
-            DeviceUnlockError::DeviceNotRecognized,
-        ),
-        (
             DeviceError::ReplyWithoutResult,
             DeviceUnlockError::DeviceNotRecognized,
         ),

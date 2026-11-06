@@ -179,7 +179,6 @@ fn connection_error_from_version_request(request_failure: &DeviceError) -> Devic
         DeviceError::NotXbtFirmware { .. } => DeviceConnectionError::NotXbtFirmware,
         DeviceError::RequestEncodingFailed(_)
         | DeviceError::MalformedMessage(_)
-        | DeviceError::UnexpectedReplyIdentifier { .. }
         | DeviceError::ReplyWithoutResult
         | DeviceError::Rejected(_)
         | DeviceError::RequestNotConfirmed { .. }

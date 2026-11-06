@@ -205,7 +205,6 @@ fn unlock_error_from_device_failure(device_failure: &DeviceError) -> DeviceUnloc
         DeviceError::RequestNotConfirmed { .. } => DeviceUnlockError::DeviceRejectedRequest,
         DeviceError::RequestEncodingFailed(_)
         | DeviceError::MalformedMessage(_)
-        | DeviceError::UnexpectedReplyIdentifier { .. }
         | DeviceError::ReplyWithoutResult
         | DeviceError::NotXbtFirmware { .. } => DeviceUnlockError::DeviceNotRecognized,
     }
