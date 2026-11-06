@@ -49,7 +49,7 @@ const unlockErrorMessages: Record<DeviceUnlockError, string> = {
   "no-connected-device": "The app is no longer connected to the board. Connect it again.",
   "connection-lost": "The connection to the board was lost. Check the cable and try again.",
   "device-not-answering":
-    "The board stopped answering. Unplug it, plug it in again and connect it.",
+    "The board did not answer in time. If it shows a menu or a message, go back to its main screen and try again.",
   "pin-entry-cancelled": "The PIN entry was cancelled on the board.",
   "network-mismatch":
     "The board is set to another network than the app, which unlocks on testnet. Change the network in the board's settings.",
