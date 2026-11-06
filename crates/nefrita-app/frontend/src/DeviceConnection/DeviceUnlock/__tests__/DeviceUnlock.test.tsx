@@ -41,7 +41,7 @@ const messagesByUnlockError: [DeviceUnlockError, string][] = [
   ["connection-lost", "The connection to the board was lost. Check the cable and try again."],
   [
     "device-not-answering",
-    "The board stopped answering. Unplug it, plug it in again and connect it.",
+    "The board did not answer in time. If it shows a menu or a message, go back to its main screen and try again.",
   ],
   ["pin-entry-cancelled", "The PIN entry was cancelled on the board."],
   [
