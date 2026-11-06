@@ -130,12 +130,42 @@ fn error_reply_to_an_unreadable_request_is_reported_as_a_rejection() {
 }
 
 #[test]
-fn reply_to_another_request_is_reported() {
-    let read_attempt = read_reply_from(reads_all_at_once(&json!({"id": "2", "result": true})), "1");
-    let Err(DeviceError::UnexpectedReplyIdentifier { expected, received }) = read_attempt else {
-        panic!("expected a reply to another request, got {read_attempt:?}");
-    };
-    assert_eq!((expected.as_str(), received.as_str()), ("1", "2"));
+fn reply_to_an_unreadable_request_is_skipped() {
+    let unreadable_request_reply_message = json!({"id": "00", "result": "unrelated"});
+    let current_reply_message = json!({"id": "1", "result": "current"});
+    let mut scripted_reads = reads_all_at_once(&unreadable_request_reply_message);
+    scripted_reads.extend(reads_all_at_once(&current_reply_message));
+    let method_result = read_reply_from(scripted_reads, "1").expect("the reply should be read");
+    assert_eq!(method_result, json!("current"));
+}
+
+#[test]
+fn reply_to_another_request_is_skipped() {
+    let late_reply_message = json!({"id": "1", "result": "late"});
+    let current_reply_message = json!({"id": "2", "result": "current"});
+    let mut scripted_reads = reads_all_at_once(&late_reply_message);
+    scripted_reads.extend(reads_all_at_once(&current_reply_message));
+    let method_result = read_reply_from(scripted_reads, "2").expect("the reply should be read");
+    assert_eq!(method_result, json!("current"));
+}
+
+#[test]
+fn error_reply_to_another_request_is_skipped() {
+    let late_error_reply_message =
+        json!({"id": "1", "error": {"code": -32000, "message": "User declined"}});
+    let mut scripted_reads = reads_all_at_once(&late_error_reply_message);
+    scripted_reads.extend(reads_all_at_once(&json!({"id": "2", "result": true})));
+    let method_result = read_reply_from(scripted_reads, "2").expect("the reply should be read");
+    assert_eq!(method_result, json!(true));
+}
+
+#[test]
+fn read_timeout_after_a_reply_to_another_request_is_reported() {
+    let late_reply_message = json!({"id": "1", "result": "late"});
+    let mut scripted_reads = reads_all_at_once(&late_reply_message);
+    scripted_reads.push(ScriptedRead::TimedOut);
+    let read_attempt = read_reply_from(scripted_reads, "2");
+    assert!(matches!(read_attempt, Err(DeviceError::ReplyTimedOut)));
 }
 
 #[test]

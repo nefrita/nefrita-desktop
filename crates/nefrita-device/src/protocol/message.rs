@@ -1,6 +1,6 @@
 use std::io::{ErrorKind, Read};
 
-use serde::de::DeserializeOwned;
+use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
 
 use crate::error::DeviceError;
@@ -25,12 +25,12 @@ struct Request<'request, Parameters> {
 struct MessageEnvelope {
     #[serde(rename = "id")]
     identifier: Option<String>,
+    #[serde(rename = "error")]
+    error_reply: Option<IgnoredAny>,
 }
 
 #[derive(Deserialize)]
 struct Reply<MethodResult> {
-    #[serde(rename = "id")]
-    identifier: String,
     #[serde(rename = "result")]
     method_result: Option<MethodResult>,
     #[serde(rename = "error")]
@@ -64,8 +64,8 @@ impl MessageReader {
     ) -> Result<MethodResult, DeviceError> {
         loop {
             let message_bytes = self.read_message(connection)?;
-            if is_reply(&message_bytes) {
-                return decode_reply(&message_bytes, request_identifier);
+            if answers_request(&message_bytes, request_identifier) {
+                return decode_reply(&message_bytes);
             }
         }
     }
@@ -119,28 +119,23 @@ fn complete_message_length(received_bytes: &[u8]) -> Result<Option<usize>, Devic
     }
 }
 
-fn is_reply(message_bytes: &[u8]) -> bool {
-    minicbor_serde::from_slice::<MessageEnvelope>(message_bytes)
-        .is_ok_and(|envelope| envelope.identifier.is_some())
+fn answers_request(message_bytes: &[u8], request_identifier: &str) -> bool {
+    let Ok(message_envelope) = minicbor_serde::from_slice::<MessageEnvelope>(message_bytes) else {
+        return false;
+    };
+    let replied_request_identifier = message_envelope.identifier.as_deref();
+    let rejects_an_unreadable_request = message_envelope.error_reply.is_some()
+        && replied_request_identifier == Some(UNREADABLE_REQUEST_IDENTIFIER);
+    replied_request_identifier == Some(request_identifier) || rejects_an_unreadable_request
 }
 
 fn decode_reply<MethodResult: DeserializeOwned>(
     message_bytes: &[u8],
-    request_identifier: &str,
 ) -> Result<MethodResult, DeviceError> {
     let decoded_reply: Reply<MethodResult> = minicbor_serde::from_slice(message_bytes)
         .map_err(|decoding_error| DeviceError::MalformedMessage(decoding_error.to_string()))?;
-    let answers_this_request = decoded_reply.identifier == request_identifier;
-    if let Some(error_reply) = decoded_reply.error_reply
-        && (answers_this_request || decoded_reply.identifier == UNREADABLE_REQUEST_IDENTIFIER)
-    {
+    if let Some(error_reply) = decoded_reply.error_reply {
         return Err(DeviceError::Rejected(error_reply));
-    }
-    if !answers_this_request {
-        return Err(DeviceError::UnexpectedReplyIdentifier {
-            expected: request_identifier.to_owned(),
-            received: decoded_reply.identifier,
-        });
     }
     decoded_reply
         .method_result
