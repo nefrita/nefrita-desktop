@@ -3,7 +3,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::rc::Rc;
 
-use nefrita_device::ErrorReply;
+use nefrita_device::{CustomPinServerCheckError, ErrorReply};
 use serde_json::json;
 
 use super::*;
@@ -180,6 +180,10 @@ fn device_failures_become_their_unlock_errors() {
             DeviceError::NotXbtFirmware {
                 chain: Some("BTC".to_owned()),
             },
+            DeviceUnlockError::DeviceNotRecognized,
+        ),
+        (
+            DeviceError::InvalidCustomPinServer(CustomPinServerCheckError::InvalidPublicKey),
             DeviceUnlockError::DeviceNotRecognized,
         ),
     ];

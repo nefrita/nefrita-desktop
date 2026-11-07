@@ -206,7 +206,8 @@ fn unlock_error_from_device_failure(device_failure: &DeviceError) -> DeviceUnloc
         DeviceError::RequestEncodingFailed(_)
         | DeviceError::MalformedMessage(_)
         | DeviceError::ReplyWithoutResult
-        | DeviceError::NotXbtFirmware { .. } => DeviceUnlockError::DeviceNotRecognized,
+        | DeviceError::NotXbtFirmware { .. }
+        | DeviceError::InvalidCustomPinServer(_) => DeviceUnlockError::DeviceNotRecognized,
     }
 }
 
