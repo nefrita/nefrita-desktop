@@ -13,8 +13,10 @@ use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 
+pub(crate) use certificates::parse_root_certificates;
 pub use error::PinServerError;
 pub use http::HttpPinServer;
+pub(crate) use url_choice::is_onion_host;
 
 #[derive(Debug, Clone, Copy)]
 enum PinServerRoute {
