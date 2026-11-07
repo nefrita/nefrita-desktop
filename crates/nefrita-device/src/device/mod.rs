@@ -13,7 +13,7 @@ use crate::connection::DeviceConnection;
 use crate::error::DeviceError;
 use crate::protocol::{self, MessageReader};
 
-pub use custom_pin_server::CustomPinServer;
+pub use custom_pin_server::{CustomPinServer, CustomPinServerCheckError};
 #[cfg(feature = "debug-methods")]
 pub use debug_methods::DebugWalletKind;
 pub use unlock::UnlockOutcome;

@@ -24,3 +24,14 @@ fn pin_server_failure_shows_its_cause_in_the_message_not_as_its_source() {
     );
     assert!(pin_server_failure.source().is_none());
 }
+
+#[test]
+fn custom_pin_server_check_failure_shows_its_cause_in_the_message_not_as_its_source() {
+    let custom_pin_server_check_failure =
+        DeviceError::InvalidCustomPinServer(CustomPinServerCheckError::InvalidPublicKey);
+    assert_eq!(
+        custom_pin_server_check_failure.to_string(),
+        "the custom PIN server was not sent to the device: the PIN server public key is not a compressed public key"
+    );
+    assert!(custom_pin_server_check_failure.source().is_none());
+}
