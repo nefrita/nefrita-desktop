@@ -1,3 +1,6 @@
+#[cfg(test)]
+pub(crate) mod scripted;
+
 use std::io;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
