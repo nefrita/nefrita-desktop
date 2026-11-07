@@ -1,6 +1,6 @@
 use std::io;
 
-use nefrita_device::{ErrorReply, PinServerError, UsbSerialChip};
+use nefrita_device::{CustomPinServerCheckError, ErrorReply, PinServerError, UsbSerialChip};
 use serde_json::json;
 
 use super::*;
@@ -254,6 +254,10 @@ fn version_request_failures_become_their_error_codes() {
         ),
         (
             DeviceError::UnsupportedPinServerRequest("an unknown request".to_owned()),
+            DeviceConnectionError::DeviceNotRecognized,
+        ),
+        (
+            DeviceError::InvalidCustomPinServer(CustomPinServerCheckError::InvalidPublicKey),
             DeviceConnectionError::DeviceNotRecognized,
         ),
     ];

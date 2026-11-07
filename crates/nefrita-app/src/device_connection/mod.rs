@@ -183,7 +183,8 @@ fn connection_error_from_version_request(request_failure: &DeviceError) -> Devic
         | DeviceError::Rejected(_)
         | DeviceError::RequestNotConfirmed { .. }
         | DeviceError::PinServerFailed(_)
-        | DeviceError::UnsupportedPinServerRequest(_) => DeviceConnectionError::DeviceNotRecognized,
+        | DeviceError::UnsupportedPinServerRequest(_)
+        | DeviceError::InvalidCustomPinServer(_) => DeviceConnectionError::DeviceNotRecognized,
     }
 }
 
