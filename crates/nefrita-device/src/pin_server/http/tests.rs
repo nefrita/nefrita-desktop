@@ -1,3 +1,4 @@
+use std::fmt;
 use std::net::TcpListener;
 
 use rcgen::{BasicConstraints, IsCa, KeyPair};
@@ -16,6 +17,7 @@ const ENCRYPTED_SERVER_REPLY: &str = "server reply";
 const OWN_AUTHORITY_NAME: &str = "Nefrita test authority";
 const OTHER_AUTHORITY_NAME: &str = "Other test authority";
 const ONION_PIN_SERVER_URL: &str = "http://pinserver.onion/get_pin";
+const ONION_PIN_SERVER_BASE_URL: &str = "http://pinserver.onion";
 
 const SERVER_REPLY_RESPONSE: ScriptedHttpResponse = ScriptedHttpResponse {
     status_line: "HTTP/1.1 200 OK",
@@ -36,8 +38,13 @@ fn pin_server_request(
     }
 }
 
+fn local_pin_server_base_url(url_scheme: &str, server_port: u16) -> String {
+    format!("{url_scheme}://{TEST_SERVER_ADDRESS}:{server_port}")
+}
+
 fn local_pin_server_url(url_scheme: &str, server_port: u16) -> String {
-    format!("{url_scheme}://{TEST_SERVER_ADDRESS}:{server_port}/get_pin")
+    let pin_server_base_url = local_pin_server_base_url(url_scheme, server_port);
+    format!("{pin_server_base_url}/get_pin")
 }
 
 fn server_reply_payload() -> PinServerPayload {
@@ -81,10 +88,42 @@ fn exchange_over_https(
     exchange_attempt
 }
 
-fn assert_request_failed(exchange_attempt: &Result<PinServerPayload, PinServerError>) {
+fn check_reachability_over_http(
+    scripted_response: ScriptedHttpResponse,
+) -> (Result<(), PinServerError>, CapturedHttpRequest) {
+    let (server_port, server_thread) = start_http_server(scripted_response);
+    let reachability_check_attempt = HttpPinServer::direct()
+        .check_reachability(&[local_pin_server_base_url("http", server_port)], &[]);
+    let captured_request = server_thread
+        .join()
+        .expect("the test server thread should not panic")
+        .expect("the test server should capture the request");
+    (reachability_check_attempt, captured_request)
+}
+
+fn check_reachability_over_https(
+    server_certificate: &rcgen::Certificate,
+    server_key: &KeyPair,
+    root_certificates_pem: Vec<String>,
+) -> Result<(), PinServerError> {
+    let (server_port, server_thread) =
+        start_https_server(server_certificate, server_key, SERVER_REPLY_RESPONSE);
+    let reachability_check_attempt = HttpPinServer::direct().check_reachability(
+        &[local_pin_server_base_url("https", server_port)],
+        &root_certificates_pem,
+    );
+    server_thread
+        .join()
+        .expect("the test server thread should not panic");
+    reachability_check_attempt
+}
+
+fn assert_request_failed<SuccessfulOutcome: fmt::Debug>(
+    pin_server_attempt: &Result<SuccessfulOutcome, PinServerError>,
+) {
     assert!(
-        matches!(exchange_attempt, Err(PinServerError::RequestFailed(_))),
-        "expected a failed request, got {exchange_attempt:?}"
+        matches!(pin_server_attempt, Err(PinServerError::RequestFailed(_))),
+        "expected a failed request, got {pin_server_attempt:?}"
     );
 }
 
@@ -261,4 +300,86 @@ fn tor_route_with_the_proxy_down_fails_without_contacting_the_normal_url() {
         Err(PinServerError::TorProxyUnreachable(tor_socks_proxy_address))
     );
     assert_never_contacted(&normal_url_listener);
+}
+
+#[test]
+fn reachability_check_asks_for_the_root_of_the_base_url() {
+    let (reachability_check_attempt, captured_request) =
+        check_reachability_over_http(SERVER_REPLY_RESPONSE);
+    assert_eq!(reachability_check_attempt, Ok(()));
+    let lowercase_request_head = captured_request.request_head.to_ascii_lowercase();
+    assert!(lowercase_request_head.starts_with("get / http/1.1\r\n"));
+    assert!(!lowercase_request_head.contains("user-agent"));
+}
+
+#[test]
+fn reachability_check_reports_an_http_status_other_than_ok() {
+    let (reachability_check_attempt, _) = check_reachability_over_http(ScriptedHttpResponse {
+        status_line: "HTTP/1.1 404 Not Found",
+        extra_headers: "",
+        response_body: "{}",
+    });
+    assert_eq!(
+        reachability_check_attempt,
+        Err(PinServerError::UnexpectedHttpStatus(404))
+    );
+}
+
+#[test]
+fn reachability_check_trusts_an_own_certificate_authority() {
+    let own_authority = certificate_authority(OWN_AUTHORITY_NAME);
+    let (server_certificate, server_key) =
+        certificate_signed_by(&own_authority, TEST_SERVER_ADDRESS);
+    let reachability_check_attempt = check_reachability_over_https(
+        &server_certificate,
+        &server_key,
+        vec![own_authority.certificate.pem()],
+    );
+    assert_eq!(reachability_check_attempt, Ok(()));
+}
+
+#[test]
+fn reachability_check_refuses_a_server_signed_by_another_authority() {
+    let own_authority = certificate_authority(OWN_AUTHORITY_NAME);
+    let other_authority = certificate_authority(OTHER_AUTHORITY_NAME);
+    let (server_certificate, server_key) =
+        certificate_signed_by(&own_authority, TEST_SERVER_ADDRESS);
+    let reachability_check_attempt = check_reachability_over_https(
+        &server_certificate,
+        &server_key,
+        vec![other_authority.certificate.pem()],
+    );
+    assert_request_failed(&reachability_check_attempt);
+}
+
+#[test]
+fn reachability_check_refuses_a_self_signed_certificate_marked_as_authority() {
+    let (server_certificate, server_key) = self_signed_certificate(
+        TEST_SERVER_ADDRESS,
+        IsCa::Ca(BasicConstraints::Unconstrained),
+    );
+    let reachability_check_attempt = check_reachability_over_https(
+        &server_certificate,
+        &server_key,
+        vec![server_certificate.pem()],
+    );
+    let Err(PinServerError::RequestFailed(request_error_description)) = reachability_check_attempt
+    else {
+        panic!("expected a failed request, got {reachability_check_attempt:?}");
+    };
+    assert!(
+        request_error_description.contains("CaUsedAsEndEntity"),
+        "unexpected error: {request_error_description}"
+    );
+}
+
+#[test]
+fn reachability_check_without_tor_refuses_a_list_with_only_an_onion_url() {
+    let onion_only_urls = vec![ONION_PIN_SERVER_BASE_URL.to_owned()];
+    let reachability_check_attempt =
+        HttpPinServer::direct().check_reachability(&onion_only_urls, &[]);
+    assert_eq!(
+        reachability_check_attempt,
+        Err(PinServerError::NoUsableUrl(onion_only_urls))
+    );
 }
