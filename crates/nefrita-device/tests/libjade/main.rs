@@ -134,6 +134,14 @@ fn create_pin_wallet(device: &mut Device<TcpStream>, pin_server: &mut RecordingH
     assert_eq!(unlock_outcome, UnlockOutcome::Unlocked);
 }
 
+fn unlock_after_logout(device: &mut Device<TcpStream>, pin_server: &mut RecordingHttpPinServer) {
+    device.logout().expect("libjade should log out");
+    let unlock_outcome = device
+        .unlock(UNLOCK_NETWORK, pin_server)
+        .expect("the unlock should finish");
+    assert_eq!(unlock_outcome, UnlockOutcome::Unlocked);
+}
+
 #[test]
 #[ignore = "needs libjade_daemon built with XBT, listening at NEFRITA_LIBJADE_ADDRESS"]
 fn xbt_libjade_reports_the_xbt_chain() {
@@ -150,11 +158,26 @@ fn pin_wallet_is_created_and_unlocked_with_the_development_pin_server() {
     let mut device = connect_to_clean_libjade();
     let mut pin_server = RecordingHttpPinServer::direct();
     create_pin_wallet(&mut device, &mut pin_server);
-    device.logout().expect("libjade should log out");
-    let unlock_outcome = device
+    unlock_after_logout(&mut device, &mut pin_server);
+    assert_eq!(
+        pin_server.offered_urls,
+        [
+            format!("{DEVELOPMENT_PIN_SERVER_URL}/set_pin"),
+            format!("{DEVELOPMENT_PIN_SERVER_URL}/get_pin"),
+        ]
+    );
+}
+
+#[test]
+#[ignore = "needs libjade_daemon built with XBT and the development PIN server"]
+fn pin_wallet_is_created_and_unlocked_on_a_device_without_a_wallet() {
+    let mut device = connect_to_clean_libjade();
+    let mut pin_server = RecordingHttpPinServer::direct();
+    let creation_outcome = device
         .unlock(UNLOCK_NETWORK, &mut pin_server)
-        .expect("the unlock should finish");
-    assert_eq!(unlock_outcome, UnlockOutcome::Unlocked);
+        .expect("the wallet creation should finish");
+    assert_eq!(creation_outcome, UnlockOutcome::Unlocked);
+    unlock_after_logout(&mut device, &mut pin_server);
     assert_eq!(
         pin_server.offered_urls,
         [
@@ -197,11 +220,7 @@ fn pin_wallet_is_created_and_unlocked_with_the_custom_pin_server() {
         .expect("libjade should accept the custom PIN server");
     let mut pin_server = RecordingHttpPinServer::direct();
     create_pin_wallet(&mut device, &mut pin_server);
-    device.logout().expect("libjade should log out");
-    let unlock_outcome = device
-        .unlock(UNLOCK_NETWORK, &mut pin_server)
-        .expect("the unlock should finish");
-    assert_eq!(unlock_outcome, UnlockOutcome::Unlocked);
+    unlock_after_logout(&mut device, &mut pin_server);
     assert_eq!(
         pin_server.offered_urls,
         [
@@ -224,11 +243,7 @@ fn pin_wallet_is_created_and_unlocked_through_tor_with_the_custom_pin_server() {
         .expect("libjade should accept the custom PIN server with an onion URL");
     let mut pin_server = RecordingHttpPinServer::through_tor(test_socks_proxy.address);
     create_pin_wallet(&mut device, &mut pin_server);
-    device.logout().expect("libjade should log out");
-    let unlock_outcome = device
-        .unlock(UNLOCK_NETWORK, &mut pin_server)
-        .expect("the unlock through Tor should finish");
-    assert_eq!(unlock_outcome, UnlockOutcome::Unlocked);
+    unlock_after_logout(&mut device, &mut pin_server);
     let test_onion_url = format!("http://{TEST_ONION_HOST_NAME}");
     assert_eq!(
         pin_server.offered_urls,
@@ -277,6 +292,24 @@ fn unreachable_custom_pin_server_fails_the_unlock() {
     assert!(
         matches!(pin_server_error, PinServerError::RequestFailed(_)),
         "expected a failed PIN server request, got {pin_server_error:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs libjade_daemon built with XBT, the development PIN server and the public key file of the custom PIN server"]
+fn reset_returns_to_the_development_pin_server() {
+    let mut device = connect_to_clean_libjade();
+    device
+        .set_custom_pin_server(&custom_pin_server_at(UNREACHABLE_PIN_SERVER_URL))
+        .expect("libjade should accept the custom PIN server");
+    device
+        .reset_pin_server()
+        .expect("libjade should accept the reset");
+    let mut pin_server = RecordingHttpPinServer::direct();
+    create_pin_wallet(&mut device, &mut pin_server);
+    assert_eq!(
+        pin_server.offered_urls,
+        [format!("{DEVELOPMENT_PIN_SERVER_URL}/set_pin")]
     );
 }
 
