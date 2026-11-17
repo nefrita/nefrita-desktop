@@ -3,7 +3,7 @@ import type { ConnectedDeviceState } from "../../bindings/ConnectedDeviceState";
 import type { WalletCreation } from "../../bindings/WalletCreation";
 import { createWallet } from "../../commands/walletCreation";
 import { commandFailureMessage } from "../commandFailureMessage";
-import { unlockErrorMessages, unlockStepTexts } from "../DeviceUnlock/DeviceUnlock";
+import { unlockErrorMessages, unlockStepTexts } from "../DeviceUnlock";
 import { PinServerChoice, type PinServerChoiceStatus } from "./PinServerChoice";
 
 type WalletCreationProgress =
