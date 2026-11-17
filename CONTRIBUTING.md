@@ -10,7 +10,7 @@
 
 Each domain of a crate lives in its own folder, with a `mod.rs` that declares its modules and what they export. The unit tests of a module go in their own `tests.rs`: `message.rs` declares `#[cfg(test)] mod tests;`, and its tests live in `message/tests.rs`. A file, code or tests, should stay around 300 lines at most; when one gets close, look for a second responsibility and move it to its own file.
 
-The frontend, in `crates/nefrita-app/frontend/src`, is organized by view. Each view has its own folder, named in PascalCase like its components, with an `index.ts` that exports them; its tests go in `__tests__/`, in files ending in `.test.tsx`, and its hooks and translations, when it has them, in `hooks/` and `locales/`. A view with several sections has a subfolder per section, laid out the same way. Inside a view, files import each other directly, and the rest of the app imports the view through its `index.ts`; a view imports each of its sections the same way, through the section's `index.ts`. The typed calls to the commands of the app live in `commands/`, one module per Rust domain, because several views can share them. The root of `src/` keeps what belongs to the whole app (`main.tsx`, `App.tsx` and `styles.css`) and `bindings/`, the TypeScript types that `cargo test` generates from Rust. For example, `DeviceConnection/` holds `DeviceConnection.tsx`, its `index.ts` and `__tests__/DeviceConnection.test.tsx`, and a subfolder for each of its three sections, `BoardPortList/`, `ConnectedDeviceDetails/` and `DeviceUnlock/`, each with its component, its `index.ts` and its `__tests__/`; and `commands/boardPorts.ts`, `commands/deviceConnection.ts` and `commands/deviceUnlock.ts` hold the calls of the `board_ports`, `device_connection` and `device_unlock` modules of Rust.
+The frontend, in `crates/nefrita-app/frontend/src`, is organized by view. Each view has its own folder, named in PascalCase like its components, with an `index.ts` that exports them; its tests go in `__tests__/`, in files ending in `.test.tsx`, or in `.test.ts` when they have no JSX, and its hooks and translations, when it has them, in `hooks/` and `locales/`. A view with several sections has a subfolder per section, laid out the same way, and a section can have sections of its own. Inside a view, files import each other directly, and the rest of the app imports the view through its `index.ts`; a view imports each of its sections the same way, through the section's `index.ts`, and so does a section that uses what another section exports. What belongs to the whole view, rather than to one of its sections, goes in a module at the root of the view folder. The typed calls to the commands of the app live in `commands/`, one module per Rust domain, because several views can share them. The root of `src/` keeps what belongs to the whole app (`main.tsx`, `App.tsx` and `styles.css`) and `bindings/`, the TypeScript types that `cargo test` generates from Rust. For example, `DeviceConnection/` holds `DeviceConnection.tsx`, its `index.ts` and `__tests__/DeviceConnection.test.tsx`; `commandFailureMessage.ts`, which turns the failure of a command into the message that the view and its sections show, with its test in `__tests__/`; and a subfolder for each of its four sections, `BoardPortList/`, `ConnectedDeviceDetails/`, `DeviceUnlock/` and `WalletSetup/`, each with its component, its `index.ts` and its `__tests__/`. `WalletSetup/` has a section of its own, `PinServerChoice/`, which has another, `CustomPinServerForm/`. `WalletSetup/` also reuses the step texts and the error messages that `DeviceUnlock/` exports. The modules of `commands/` hold the calls of the Rust modules of the same name: `boardPorts.ts`, `deviceConnection.ts`, `deviceUnlock.ts`, `pinServerChoice.ts` and `walletCreation.ts`, those of `board_ports`, `device_connection`, `device_unlock`, `pin_server_choice` and `wallet_creation`.
 
 ### Adding a command
 
@@ -139,16 +139,17 @@ pnpm tauri dev
 
 This starts the Vite development server, compiles the app in debug mode and opens its window. A change in the frontend reaches the window right away, through Vite, and a change in Rust makes the CLI rebuild and restart the app; `crates/nefrita-app/.taurignore` keeps the frontend out of what the CLI watches. The window opens on a welcome, and "Connect a board" lists the boards plugged in by USB, with their port, chip, product and serial number; a button searches again. "Connect" on a board makes the app list the boards again and open its port only if it is still on the list; then the app checks that the firmware is XBT and shows the firmware version, the board type and the state. "Disconnect" closes the port and goes back to the list. While a board is connected, the window checks every 2 seconds that its port is still on the list, and when the board is unplugged, it goes back to the list and says so. In debug builds, right-clicking the page opens a menu with the web inspector.
 
-Below the details, the app offers what the state of the board allows. It unlocks on `xbt-testnet4` through the PIN server that the board asks for, which in XBT development builds is the development one, so first run the `local-pinserver` of "What you need", in "Manual tests with a board":
+Below the details, the app offers what the state of the board allows. It creates, saves and unlocks wallets on `xbt-testnet4` through the PIN server of the board, which in XBT development builds is the development one unless you give it a custom one (see "Using a custom PIN server"), so first run the `local-pinserver` of "What you need", in "Manual tests with a board":
 
 - **Locked:** "Unlock" asks for the PIN on the board, shows each step of the exchange with the PIN server, and then shows the new state, or that the board refused the PIN. After a wrong PIN, the board shows `Incorrect PIN!` until you press its button, and the app waits as long as that takes. "Disconnect" stays hidden while the app unlocks: to stop an unlock, cancel the PIN entry on the board or unplug it.
 - **Unlocked:** "Log out" locks a saved wallet.
 - **Temporary wallet:** "Unlock" needs no PIN, and the app warns that the board erases the wallet when it is powered off or logged out. "Log out" asks to confirm the erase first.
-- **No wallet yet or Wallet not saved:** the app offers neither, because creating a wallet from the app comes later; create it with the example program of "Manual tests with a board".
+- **No wallet yet or Wallet not saved:** the app offers to set up the wallet.
+  - **PIN server:** the app says that the board uses Nefrita's PIN server unless someone set another one on it, and how to check it on the board. "Use my own PIN server" opens a form for the URL, an optional onion URL, the public key in hexadecimal and an optional certificate in PEM. The app checks the details, marking the field that is wrong, and that the server answers, before the board shows anything. Then the board shows the URL and the whole public key, and the hash of the certificate if there is one, and the app says what to compare them with; nothing changes until you confirm on the board. "Use Nefrita's PIN server again" goes back to the PIN server of the firmware, after two questions on the board.
+  - **Create or save:** "Create the wallet", or "Save the wallet" when the wallet is not saved, asks you to follow the board, which guides you through creating or recovering the wallet and choosing its PIN, or only through the PIN. The app shows each step of the exchange with the PIN server and then, above "Log out", that the wallet is saved and the URL of the PIN server that registered its PIN. If you leave the creation on the board, the board stays without a wallet; if you cancel the PIN, the wallet stays on the board without being saved, ready for "Save the wallet".
+  - "Disconnect" stays hidden while the board waits for you. The key pair of the development PIN server is public: a wallet created with it is only for testing, and must never hold real funds.
 
-XBT development builds do not report yet whether an unlocked wallet is temporary, so the app cannot tell it from a saved one and asks with a neutral text before every logout.
-
-The app has five commands of its own, `search_board_ports`, `connect_device`, `disconnect_device`, `unlock_device` and `logout_device`, and `crates/nefrita-app/capabilities/main-window.json` gives the main window those five alone, with no permission of the Tauri core. `unlock_device` reports its steps through a channel that the page passes to it, and a channel needs no permission.
+The app has eight commands of its own, `search_board_ports`, `connect_device`, `disconnect_device`, `unlock_device`, `logout_device`, `set_custom_pin_server`, `reset_pin_server` and `create_wallet`, and `crates/nefrita-app/capabilities/main-window.json` gives the main window those eight alone, with no permission of the Tauri core. `unlock_device` and `create_wallet` report their steps through a channel that the page passes to them, and a channel needs no permission.
 
 In development the page comes from the Vite development server, with the content security policy of `vite.config.ts`: Tauri only applies the one in `tauri.conf.json` to the pages it serves itself. A plain `cargo run --package nefrita-app` also loads the page from `http://localhost:5173`, so it only shows it while the Vite development server is running.
 
@@ -165,6 +166,27 @@ cargo run --release --package nefrita-app --features tauri/custom-protocol
 ```
 
 `tauri/custom-protocol` is the feature that the Tauri CLI adds to its release builds, and cargo needs it explicitly. Without it, even a release build loads the page from the Vite development server, and the window stays blank when that server is not running. Both commands use the `frontend/dist` of the last `pnpm build`, so run it again after changing the frontend.
+
+### Using a custom PIN server
+
+To try the app with a PIN server other than the development one, use the custom PIN server of "Integration tests". Prepare its image and its key pair once, with the variables and the preparation block of that section; for this alone, the `docker run` that builds `libjade_daemon` can be left out. Then, from the root of the repository, start the server on port 8097 and print its public key in hexadecimal, the form in which the board shows it:
+
+```bash
+custom_pin_server_key_directory="$PWD/target/custom-pin-server"
+docker run --rm --detach --name custom-pin-server --platform linux/amd64 \
+  --publish 8097:8096 --tmpfs /pins \
+  --volume "$custom_pin_server_key_directory/server_private_key.key":/server_private_key.key:ro \
+  pin-server
+od -An -tx1 -v "$custom_pin_server_key_directory/server_public_key.pub" | tr -d ' \n'; echo
+```
+
+With a board that has no saved wallet, choose "Use my own PIN server", enter `http://localhost:8097` and that key, and leave the certificate empty, because this server serves plain HTTP. On the board, check that the URL and the key are the ones above, and confirm. Then "Create the wallet" or "Save the wallet" registers the PIN with this server, and when the wallet is saved the app shows its URL.
+
+This server keeps the PINs in memory (`--tmpfs /pins`): once it stops, a wallet registered with it can no longer be unlocked. And once the wallet is saved, the app no longer offers to change the PIN server, because the firmware refuses a new key while it stores a wallet with a PIN. To go back to the development server, erase the board with "Factory Reset", in the menu that opens when you press a button on its first screen as it powers on, and create or recover the wallet again; the erase also removes the custom PIN server. When you are done, stop the server:
+
+```bash
+docker stop custom-pin-server
+```
 
 ## Integration tests
 
@@ -236,7 +258,7 @@ If a test fails, `docker logs` with the name of a container (`libjade-daemon`, `
 
 ## Manual tests with a board
 
-The example program `crates/nefrita-device/examples/unlock_over_usb.rs` talks to a real board over USB without the app: it finds the board, checks that its firmware is XBT, prints its version and state, and unlocks it through the PIN server. It is a development tool: it tests `nefrita-device` on its own, which tells whether a failure comes from the crate or from the app; it connects, with `--port`, to a board whose chip is not on the list, which the app does not do; and until the app does them, it is the way to create a wallet on a board and to unlock through Tor.
+The example program `crates/nefrita-device/examples/unlock_over_usb.rs` talks to a real board over USB without the app: it finds the board, checks that its firmware is XBT, prints its version and state, and unlocks it through the PIN server. It is a development tool: it tests `nefrita-device` on its own, which tells whether a failure comes from the crate or from the app; it connects, with `--port`, to a board whose chip is not on the list, which the app does not do; and until the app does it, it is the way to unlock through Tor.
 
 ### What you need
 
