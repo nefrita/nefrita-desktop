@@ -188,6 +188,8 @@ This server keeps the PINs in memory (`--tmpfs /pins`): once it stops, a wallet 
 docker stop custom-pin-server
 ```
 
+To run a custom PIN server with TLS and keys of your own, follow [`docs/custom-pin-server.md`](docs/custom-pin-server.md).
+
 ## Integration tests
 
 The integration tests of `nefrita-device` talk to `libjade_daemon`, the Nefrita firmware compiled for a computer, built with XBT and listening on a TCP port. They also talk to two PIN servers: the development server, with the test key pair of the firmware repository, at `http://localhost:8096`, the address compiled into XBT development builds; and a custom server, with its own key pair, at `http://localhost:8097`.
