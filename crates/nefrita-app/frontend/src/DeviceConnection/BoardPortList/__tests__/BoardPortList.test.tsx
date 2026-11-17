@@ -86,7 +86,7 @@ test("shows a general message and logs the cause for an unknown failure", async 
   const failureParagraph = await screen.findByRole("alert");
   expect(failureParagraph.textContent).toBe("The board search failed.");
   expect(consoleErrorSpy).toHaveBeenCalledWith(
-    "The board search failed without a known code:",
+    "The board search failed.",
     "Command search_board_ports not allowed by ACL",
   );
 });

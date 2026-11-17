@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { BoardPort } from "../../bindings/BoardPort";
 import type { BoardPortSearchError } from "../../bindings/BoardPortSearchError";
 import { searchBoardPorts } from "../../commands/boardPorts";
+import { commandFailureMessage } from "../commandFailureMessage";
 
 type BoardPortSearch =
   | { stage: "searching" }
@@ -13,11 +14,7 @@ const searchErrorMessages: Record<BoardPortSearchError, string> = {
   "search-interrupted": "The board search stopped before it finished.",
 };
 
-const unknownFailureMessage = "The board search failed.";
-
-function isBoardPortSearchError(searchFailure: unknown): searchFailure is BoardPortSearchError {
-  return typeof searchFailure === "string" && Object.hasOwn(searchErrorMessages, searchFailure);
-}
+const unknownSearchFailureMessage = "The board search failed.";
 
 export function BoardPortList({ onConnect }: { onConnect: (portName: string) => void }) {
   const [boardPortSearch, setBoardPortSearch] = useState<BoardPortSearch>({ stage: "searching" });
@@ -28,12 +25,14 @@ export function BoardPortList({ onConnect }: { onConnect: (portName: string) => 
       const boardPorts = await searchBoardPorts();
       setBoardPortSearch({ stage: "found", boardPorts });
     } catch (searchFailure) {
-      if (isBoardPortSearchError(searchFailure)) {
-        setBoardPortSearch({ stage: "failed", failureMessage: searchErrorMessages[searchFailure] });
-      } else {
-        console.error("The board search failed without a known code:", searchFailure);
-        setBoardPortSearch({ stage: "failed", failureMessage: unknownFailureMessage });
-      }
+      setBoardPortSearch({
+        stage: "failed",
+        failureMessage: commandFailureMessage(
+          searchFailure,
+          searchErrorMessages,
+          unknownSearchFailureMessage,
+        ),
+      });
     }
   }, []);
 
