@@ -19,6 +19,11 @@ const eraseConfirmation =
 const possiblyTemporaryWalletLogoutConfirmation =
   "If this wallet is temporary, logging out erases it. To use it again, you have to enter its recovery phrase on the board.";
 
+const pinRefusedMessage =
+  "The board refused the PIN. It shows how many attempts are left when you unlock it again.";
+
+const walletErasedMessage = "The board refused the PIN three times in a row and erased its wallet.";
+
 const unlockedSavedWallet: UnlockAttempt = { outcome: "unlocked", deviceState: "ready" };
 
 const unlockedTemporaryWallet: UnlockAttempt = {
@@ -26,15 +31,12 @@ const unlockedTemporaryWallet: UnlockAttempt = {
   deviceState: "temporary-unlocked",
 };
 
-const deviceStatesWithoutASavedWallet: ConnectedDeviceState[] = ["uninitialized", "unsaved"];
+const refusedPinOnALockedWallet: UnlockAttempt = { outcome: "refused", deviceState: "locked" };
 
-const messagesByStateAfterRefusal: [ConnectedDeviceState, string][] = [
-  [
-    "locked",
-    "The board refused the PIN. It shows how many attempts are left when you unlock it again.",
-  ],
-  ["uninitialized", "The board refused the PIN three times in a row and erased its wallet."],
-];
+const refusedPinThatErasedTheWallet: UnlockAttempt = {
+  outcome: "refused",
+  deviceState: "uninitialized",
+};
 
 const messagesByUnlockError: [DeviceUnlockError, string][] = [
   ["no-connected-device", "The app is no longer connected to the board. Connect it again."],
@@ -92,7 +94,7 @@ function renderDeviceUnlock({
   onUnlockingChange = () => undefined,
 }: {
   deviceState?: ConnectedDeviceState;
-  onDeviceStateChange?: (deviceState: ConnectedDeviceState) => void;
+  onDeviceStateChange?: (deviceState: ConnectedDeviceState, sectionChangeMessage?: string) => void;
   onUnlockingChange?: (unlockInProgress: boolean) => void;
 } = {}) {
   render(
@@ -143,19 +145,26 @@ test("asks for the PIN, shows each unlock step and reports the new state", async
   expect(onUnlockingChange.mock.calls).toEqual([[true], [false]]);
 });
 
-test.each(messagesByStateAfterRefusal)(
-  "explains a refused PIN that leaves the board %s",
-  async (stateAfterRefusal, expectedMessage) => {
-    const refusedAttempt: UnlockAttempt = { outcome: "refused", deviceState: stateAfterRefusal };
-    const onDeviceStateChange = vi.fn();
-    mockUnlockCommands({ answerUnlock: () => Promise.resolve(refusedAttempt) });
-    renderDeviceUnlock({ onDeviceStateChange });
-    pressUnlock();
-    const failureParagraph = await screen.findByRole("alert");
-    expect(failureParagraph.textContent).toBe(expectedMessage);
-    expect(onDeviceStateChange).toHaveBeenCalledWith(stateAfterRefusal);
-  },
-);
+test("explains a refused PIN that leaves the board locked", async () => {
+  const onDeviceStateChange = vi.fn();
+  mockUnlockCommands({ answerUnlock: () => Promise.resolve(refusedPinOnALockedWallet) });
+  renderDeviceUnlock({ onDeviceStateChange });
+  pressUnlock();
+  const failureParagraph = await screen.findByRole("alert");
+  expect(failureParagraph.textContent).toBe(pinRefusedMessage);
+  expect(onDeviceStateChange).toHaveBeenCalledWith("locked");
+});
+
+test("reports the new state with the erased wallet instead of explaining it here", async () => {
+  const onDeviceStateChange = vi.fn();
+  mockUnlockCommands({ answerUnlock: () => Promise.resolve(refusedPinThatErasedTheWallet) });
+  renderDeviceUnlock({ onDeviceStateChange });
+  pressUnlock();
+  await waitFor(() =>
+    expect(onDeviceStateChange).toHaveBeenCalledWith("uninitialized", walletErasedMessage),
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
+});
 
 test("asks to press continue while the board shows the refused PIN", async () => {
   let reportUnlockStep: (unlockStep: UnlockStep) => void = () => undefined;
@@ -173,11 +182,9 @@ test("asks to press continue while the board shows the refused PIN", async () =>
   await screen.findByText("Enter your PIN on the board.");
   act(() => reportUnlockStep("refused-pin"));
   expect(screen.getByText("The board refused the PIN. Press continue on the board.")).toBeTruthy();
-  finishUnlock({ outcome: "refused", deviceState: "locked" });
+  finishUnlock(refusedPinOnALockedWallet);
   const failureParagraph = await screen.findByRole("alert");
-  expect(failureParagraph.textContent).toBe(
-    "The board refused the PIN. It shows how many attempts are left when you unlock it again.",
-  );
+  expect(failureParagraph.textContent).toBe(pinRefusedMessage);
 });
 
 test.each(messagesByUnlockError)(
@@ -287,13 +294,3 @@ test("shows a general message and logs the cause for an unknown logout failure",
     "Command logout_device not allowed by ACL",
   );
 });
-
-test.each(deviceStatesWithoutASavedWallet)(
-  "explains that a %s board has no saved wallet and offers no button",
-  (deviceState) => {
-    mockUnlockCommands();
-    renderDeviceUnlock({ deviceState });
-    expect(screen.getByText("This board has no saved wallet yet.")).toBeTruthy();
-    expect(screen.queryByRole("button")).toBeNull();
-  },
-);
