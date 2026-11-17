@@ -4,6 +4,13 @@ import type { DeviceUnlockError } from "../../bindings/DeviceUnlockError";
 import type { UnlockAttempt } from "../../bindings/UnlockAttempt";
 import type { UnlockStep } from "../../bindings/UnlockStep";
 import { logoutDevice, unlockDevice } from "../../commands/deviceUnlock";
+import {
+  commandFailureMessage,
+  commandInterruptedMessage,
+  connectionLostMessage,
+  deviceNotRecognizedMessage,
+  noConnectedDeviceMessage,
+} from "../commandFailureMessage";
 
 type WalletSessionProgress =
   | { stage: "idle"; failureMessage: string | null }
@@ -23,7 +30,7 @@ const pinEntryText = "Enter your PIN on the board.";
 
 const temporaryWalletUnlockText = "Unlocking…";
 
-const unlockStepTexts: Record<UnlockStep, string> = {
+export const unlockStepTexts: Record<UnlockStep, string> = {
   "pin-server-exchange": "Contacting the PIN server…",
   "pin-server-reply-check": "The board is checking the answer of the PIN server…",
   "refused-pin": "The board refused the PIN. Press continue on the board.",
@@ -43,11 +50,9 @@ const eraseConfirmation =
 const possiblyTemporaryWalletLogoutConfirmation =
   "If this wallet is temporary, logging out erases it. To use it again, you have to enter its recovery phrase on the board.";
 
-const noSavedWalletMessage = "This board has no saved wallet yet.";
-
-const unlockErrorMessages: Record<DeviceUnlockError, string> = {
-  "no-connected-device": "The app is no longer connected to the board. Connect it again.",
-  "connection-lost": "The connection to the board was lost. Check the cable and try again.",
+export const unlockErrorMessages: Record<DeviceUnlockError, string> = {
+  "no-connected-device": noConnectedDeviceMessage,
+  "connection-lost": connectionLostMessage,
   "device-not-answering":
     "The board did not answer in time. If it shows a menu or a message, go back to its main screen and try again.",
   "pin-entry-cancelled": "The PIN entry was cancelled on the board.",
@@ -61,32 +66,16 @@ const unlockErrorMessages: Record<DeviceUnlockError, string> = {
   "unsupported-pin-server-request":
     "The board asked for a PIN server request that the app does not support.",
   "device-rejected-request": "The board could not complete the request.",
-  "device-not-recognized":
-    "The board did not answer like a Nefrita board. Check that it runs the Nefrita firmware.",
-  "command-interrupted": "The app stopped before it finished talking to the board.",
+  "device-not-recognized": deviceNotRecognizedMessage,
+  "command-interrupted": commandInterruptedMessage,
 };
 
 const unknownUnlockFailureMessage = "The board could not be unlocked.";
 
 const unknownLogoutFailureMessage = "The board could not be logged out.";
 
-function isDeviceUnlockError(commandFailure: unknown): commandFailure is DeviceUnlockError {
-  return typeof commandFailure === "string" && Object.hasOwn(unlockErrorMessages, commandFailure);
-}
-
-function commandFailureMessage(commandFailure: unknown, unknownFailureMessage: string): string {
-  if (isDeviceUnlockError(commandFailure)) {
-    return unlockErrorMessages[commandFailure];
-  }
-  console.error(unknownFailureMessage, commandFailure);
-  return unknownFailureMessage;
-}
-
 function unlockAttemptFailureMessage(unlockAttempt: UnlockAttempt): string | null {
-  if (unlockAttempt.outcome === "unlocked") {
-    return null;
-  }
-  return unlockAttempt.deviceState === "uninitialized" ? walletErasedMessage : pinRefusedMessage;
+  return unlockAttempt.outcome === "unlocked" ? null : pinRefusedMessage;
 }
 
 export function DeviceUnlock({
@@ -95,14 +84,13 @@ export function DeviceUnlock({
   onUnlockingChange,
 }: {
   deviceState: ConnectedDeviceState;
-  onDeviceStateChange: (deviceState: ConnectedDeviceState) => void;
+  onDeviceStateChange: (deviceState: ConnectedDeviceState, sectionChangeMessage?: string) => void;
   onUnlockingChange: (unlockInProgress: boolean) => void;
 }) {
   const [walletSessionProgress, setWalletSessionProgress] =
     useState<WalletSessionProgress>(idleWithoutFailure);
   const walletUnlocked = unlockedDeviceStates.includes(deviceState);
   const hasTemporaryWallet = deviceState === "temporary" || deviceState === "temporary-unlocked";
-  const withoutASavedWallet = deviceState === "uninitialized" || deviceState === "unsaved";
 
   async function unlock() {
     const firstUnlockText = deviceState === "temporary" ? temporaryWalletUnlockText : pinEntryText;
@@ -112,15 +100,24 @@ export function DeviceUnlock({
       const unlockAttempt = await unlockDevice((unlockStep) =>
         setWalletSessionProgress({ stage: "unlocking", stepText: unlockStepTexts[unlockStep] }),
       );
-      setWalletSessionProgress({
-        stage: "idle",
-        failureMessage: unlockAttemptFailureMessage(unlockAttempt),
-      });
-      onDeviceStateChange(unlockAttempt.deviceState);
+      if (unlockAttempt.deviceState === "uninitialized") {
+        setWalletSessionProgress(idleWithoutFailure);
+        onDeviceStateChange(unlockAttempt.deviceState, walletErasedMessage);
+      } else {
+        setWalletSessionProgress({
+          stage: "idle",
+          failureMessage: unlockAttemptFailureMessage(unlockAttempt),
+        });
+        onDeviceStateChange(unlockAttempt.deviceState);
+      }
     } catch (unlockFailure) {
       setWalletSessionProgress({
         stage: "idle",
-        failureMessage: commandFailureMessage(unlockFailure, unknownUnlockFailureMessage),
+        failureMessage: commandFailureMessage(
+          unlockFailure,
+          unlockErrorMessages,
+          unknownUnlockFailureMessage,
+        ),
       });
     } finally {
       onUnlockingChange(false);
@@ -136,7 +133,11 @@ export function DeviceUnlock({
     } catch (logoutFailure) {
       setWalletSessionProgress({
         stage: "idle",
-        failureMessage: commandFailureMessage(logoutFailure, unknownLogoutFailureMessage),
+        failureMessage: commandFailureMessage(
+          logoutFailure,
+          unlockErrorMessages,
+          unknownLogoutFailureMessage,
+        ),
       });
     }
   }
@@ -204,7 +205,7 @@ export function DeviceUnlock({
         <p role="alert">{walletSessionProgress.failureMessage}</p>
       )}
       {hasTemporaryWallet && <p>{temporaryWalletNotice}</p>}
-      {withoutASavedWallet ? <p>{noSavedWalletMessage}</p> : walletSessionStage()}
+      {walletSessionStage()}
     </>
   );
 }

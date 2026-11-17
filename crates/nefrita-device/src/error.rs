@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 
+use crate::device::CustomPinServerCheckError;
 use crate::pin_server::PinServerError;
 use crate::protocol::ErrorReply;
 
@@ -18,6 +19,7 @@ pub enum DeviceError {
     RequestNotConfirmed { method_name: String },
     PinServerFailed(PinServerError),
     UnsupportedPinServerRequest(String),
+    InvalidCustomPinServer(CustomPinServerCheckError),
 }
 
 impl fmt::Display for DeviceError {
@@ -78,6 +80,10 @@ impl fmt::Display for DeviceError {
             Self::UnsupportedPinServerRequest(request_description) => write!(
                 formatter,
                 "the device asked for an unsupported PIN server request: {request_description}"
+            ),
+            Self::InvalidCustomPinServer(custom_pin_server_check_error) => write!(
+                formatter,
+                "the custom PIN server was not sent to the device: {custom_pin_server_check_error}"
             ),
         }
     }

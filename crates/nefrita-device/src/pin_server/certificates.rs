@@ -2,7 +2,7 @@ use ureq::tls::{Certificate, PemItem};
 
 use crate::pin_server::PinServerError;
 
-pub(super) fn parse_root_certificates(
+pub(crate) fn parse_root_certificates(
     root_certificates_pem: &[String],
 ) -> Result<Vec<Certificate<'static>>, PinServerError> {
     let mut root_certificates = Vec::new();

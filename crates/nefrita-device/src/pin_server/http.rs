@@ -13,8 +13,8 @@ use crate::pin_server::{
     PinServer, PinServerError, PinServerPayload, PinServerRequest, PinServerRoute,
 };
 
-const DIRECT_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(30);
-const TOR_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(120);
+const DIRECT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const TOR_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const TOR_SOCKS_PROXY_SCHEME: &str = "socks5h";
 const HTTP_OK_STATUS: u16 = 200;
 
@@ -37,6 +37,20 @@ impl HttpPinServer {
             },
         }
     }
+
+    pub fn check_reachability(
+        &self,
+        pin_server_base_urls: &[String],
+        root_certificates: &[String],
+    ) -> Result<(), PinServerError> {
+        let pin_server_base_url = choose_url(pin_server_base_urls, self.route)?;
+        let parsed_root_certificates = parse_root_certificates(root_certificates)?;
+        let pin_server_response = pin_server_agent(self.route, parsed_root_certificates)?
+            .get(format!("{pin_server_base_url}/"))
+            .call()
+            .map_err(|request_error| failed_request_error(self.route, request_error))?;
+        check_ok_status(pin_server_response.status().as_u16())
+    }
 }
 
 impl PinServer for HttpPinServer {
@@ -51,10 +65,7 @@ impl PinServer for HttpPinServer {
             .post(pin_server_url)
             .send_json(&pin_server_request.device_payload)
             .map_err(|request_error| failed_request_error(self.route, request_error))?;
-        let status_code = pin_server_response.status().as_u16();
-        if status_code != HTTP_OK_STATUS {
-            return Err(PinServerError::UnexpectedHttpStatus(status_code));
-        }
+        check_ok_status(pin_server_response.status().as_u16())?;
         pin_server_response
             .body_mut()
             .read_json()
@@ -76,13 +87,13 @@ fn pin_server_agent(
         .root_certs(trusted_roots)
         .unversioned_rustls_crypto_provider(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
         .build();
-    let (socks_proxy, exchange_timeout) = match route {
-        PinServerRoute::Direct => (None, DIRECT_EXCHANGE_TIMEOUT),
+    let (socks_proxy, request_timeout) = match route {
+        PinServerRoute::Direct => (None, DIRECT_REQUEST_TIMEOUT),
         PinServerRoute::Tor {
             socks_proxy_address,
         } => (
             Some(tor_socks_proxy(socks_proxy_address)?),
-            TOR_EXCHANGE_TIMEOUT,
+            TOR_REQUEST_TIMEOUT,
         ),
     };
     let agent_config = Agent::config_builder()
@@ -91,7 +102,7 @@ fn pin_server_agent(
         .max_redirects(0)
         .http_status_as_error(false)
         .user_agent(AutoHeaderValue::None)
-        .timeout_global(Some(exchange_timeout))
+        .timeout_global(Some(request_timeout))
         .build();
     Ok(Agent::new_with_config(agent_config))
 }
@@ -115,6 +126,14 @@ fn failed_request_error(route: PinServerRoute, request_error: ureq::Error) -> Pi
             PinServerError::TorProxyUnreachable(socks_proxy_address)
         }
         (_, request_error) => PinServerError::RequestFailed(request_error.to_string()),
+    }
+}
+
+fn check_ok_status(status_code: u16) -> Result<(), PinServerError> {
+    if status_code == HTTP_OK_STATUS {
+        Ok(())
+    } else {
+        Err(PinServerError::UnexpectedHttpStatus(status_code))
     }
 }
 

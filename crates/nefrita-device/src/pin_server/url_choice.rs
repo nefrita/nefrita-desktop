@@ -48,7 +48,7 @@ fn missing_url_error(route: PinServerRoute, offered_urls: &[String]) -> PinServe
     }
 }
 
-fn is_onion_host(host_name: &str) -> bool {
+pub(crate) fn is_onion_host(host_name: &str) -> bool {
     host_name
         .trim_end_matches('.')
         .to_ascii_lowercase()

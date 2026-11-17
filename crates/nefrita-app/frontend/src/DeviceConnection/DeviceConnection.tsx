@@ -5,6 +5,12 @@ import type { DeviceConnectionError } from "../bindings/DeviceConnectionError";
 import { connectDevice, disconnectDevice } from "../commands/deviceConnection";
 import { BoardPortList } from "./BoardPortList";
 import { ConnectedDeviceDetails } from "./ConnectedDeviceDetails";
+import {
+  commandFailureMessage,
+  commandInterruptedMessage,
+  connectionLostMessage,
+  deviceNotRecognizedMessage,
+} from "./commandFailureMessage";
 
 type ConnectionProgress =
   | { stage: "choosing"; failureMessage: string | null }
@@ -22,11 +28,10 @@ const connectionErrorMessages: Record<DeviceConnectionError, string> = {
     "The system did not let the app open the port. On Linux, your user needs the group of the port, such as dialout.",
   "port-open-failed": "The port could not be opened.",
   "device-not-answering": "The board did not answer. Check that it runs the Nefrita firmware.",
-  "device-not-recognized":
-    "The board did not answer like a Nefrita board. Check that it runs the Nefrita firmware.",
+  "device-not-recognized": deviceNotRecognizedMessage,
   "not-xbt-firmware": "The board does not run the XBT firmware of Nefrita.",
-  "connection-lost": "The connection to the board was lost. Check the cable and try again.",
-  "command-interrupted": "The app stopped before it finished talking to the board.",
+  "connection-lost": connectionLostMessage,
+  "command-interrupted": commandInterruptedMessage,
 };
 
 const unknownConnectionFailureMessage = "The connection to the board failed.";
@@ -34,20 +39,6 @@ const unknownConnectionFailureMessage = "The connection to the board failed.";
 const unknownDisconnectionFailureMessage = "The board could not be disconnected.";
 
 const unpluggedMessage = "The board was unplugged.";
-
-function isDeviceConnectionError(commandFailure: unknown): commandFailure is DeviceConnectionError {
-  return (
-    typeof commandFailure === "string" && Object.hasOwn(connectionErrorMessages, commandFailure)
-  );
-}
-
-function commandFailureMessage(commandFailure: unknown, unknownFailureMessage: string): string {
-  if (isDeviceConnectionError(commandFailure)) {
-    return connectionErrorMessages[commandFailure];
-  }
-  console.error(unknownFailureMessage, commandFailure);
-  return unknownFailureMessage;
-}
 
 export function DeviceConnection() {
   const [connectionProgress, setConnectionProgress] = useState<ConnectionProgress>(choosingABoard);
@@ -60,7 +51,11 @@ export function DeviceConnection() {
     } catch (connectionFailure) {
       setConnectionProgress({
         stage: "choosing",
-        failureMessage: commandFailureMessage(connectionFailure, unknownConnectionFailureMessage),
+        failureMessage: commandFailureMessage(
+          connectionFailure,
+          connectionErrorMessages,
+          unknownConnectionFailureMessage,
+        ),
       });
     }
   }
@@ -74,6 +69,7 @@ export function DeviceConnection() {
         stage: "choosing",
         failureMessage: commandFailureMessage(
           disconnectionFailure,
+          connectionErrorMessages,
           unknownDisconnectionFailureMessage,
         ),
       });

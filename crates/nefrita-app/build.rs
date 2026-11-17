@@ -6,6 +6,9 @@ const COMMAND_NAMES: &[&str] = &[
     "disconnect_device",
     "unlock_device",
     "logout_device",
+    "set_custom_pin_server",
+    "reset_pin_server",
+    "create_wallet",
 ];
 
 fn main() {

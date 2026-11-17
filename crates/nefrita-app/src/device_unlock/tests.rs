@@ -3,10 +3,11 @@ use std::io;
 use std::net::SocketAddr;
 use std::rc::Rc;
 
-use nefrita_device::ErrorReply;
+use nefrita_device::CustomPinServerCheckError;
 use serde_json::json;
 
 use super::*;
+use crate::device_connection::scripted::rejection_with_code;
 
 const PIN_SERVER_URL: &str = "http://localhost:8096";
 const PIN_SERVER_ONION_URL: &str = "http://examplepinserver.onion";
@@ -81,13 +82,6 @@ fn events_around_one_exchange() -> [RecordedEvent; 3] {
         RecordedEvent::InnerExchange(device_request()),
         RecordedEvent::ReportedStep(UnlockStep::PinServerReplyCheck),
     ]
-}
-
-fn rejection_with_code(rejection_code: i64) -> DeviceError {
-    DeviceError::Rejected(ErrorReply {
-        code: rejection_code,
-        description: "the device rejected the request".to_owned(),
-    })
 }
 
 #[test]
@@ -180,6 +174,10 @@ fn device_failures_become_their_unlock_errors() {
             DeviceError::NotXbtFirmware {
                 chain: Some("BTC".to_owned()),
             },
+            DeviceUnlockError::DeviceNotRecognized,
+        ),
+        (
+            DeviceError::InvalidCustomPinServer(CustomPinServerCheckError::InvalidPublicKey),
             DeviceUnlockError::DeviceNotRecognized,
         ),
     ];

@@ -1,1 +1,1 @@
-export { DeviceUnlock } from "./DeviceUnlock";
+export { DeviceUnlock, unlockErrorMessages, unlockStepTexts } from "./DeviceUnlock";

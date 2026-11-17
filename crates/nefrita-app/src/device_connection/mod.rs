@@ -1,3 +1,6 @@
+#[cfg(test)]
+pub(crate) mod scripted;
+
 use std::io;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -183,7 +186,8 @@ fn connection_error_from_version_request(request_failure: &DeviceError) -> Devic
         | DeviceError::Rejected(_)
         | DeviceError::RequestNotConfirmed { .. }
         | DeviceError::PinServerFailed(_)
-        | DeviceError::UnsupportedPinServerRequest(_) => DeviceConnectionError::DeviceNotRecognized,
+        | DeviceError::UnsupportedPinServerRequest(_)
+        | DeviceError::InvalidCustomPinServer(_) => DeviceConnectionError::DeviceNotRecognized,
     }
 }
 

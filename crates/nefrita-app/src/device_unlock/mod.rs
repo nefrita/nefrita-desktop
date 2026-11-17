@@ -8,7 +8,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::device_connection::{ConnectedDeviceSlot, ConnectedDeviceState};
 
-const UNLOCK_NETWORK: Network = Network::XbtTestnet4;
+pub(crate) const UNLOCK_NETWORK: Network = Network::XbtTestnet4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(export))]
@@ -54,9 +54,9 @@ pub enum DeviceUnlockError {
     CommandInterrupted,
 }
 
-struct StepReportingPinServer<InnerPinServer, UnlockStepReporter> {
-    inner_pin_server: InnerPinServer,
-    report_unlock_step: UnlockStepReporter,
+pub(crate) struct StepReportingPinServer<InnerPinServer, UnlockStepReporter> {
+    pub(crate) inner_pin_server: InnerPinServer,
+    pub(crate) report_unlock_step: UnlockStepReporter,
 }
 
 #[tauri::command]
@@ -156,7 +156,7 @@ fn device_state_after_logout(
     read_device_state(stored_device)
 }
 
-fn read_device_state(
+pub(crate) fn read_device_state(
     stored_device: &mut Device<SerialConnection>,
 ) -> Result<ConnectedDeviceState, DeviceUnlockError> {
     device_state_from_version_request(stored_device.require_xbt_firmware())
@@ -181,13 +181,16 @@ fn device_state_from_version_request(
         })
 }
 
-fn report_unlock_step_to_page(unlock_step_channel: &Channel<UnlockStep>, unlock_step: UnlockStep) {
+pub(crate) fn report_unlock_step_to_page(
+    unlock_step_channel: &Channel<UnlockStep>,
+    unlock_step: UnlockStep,
+) {
     if let Err(delivery_failure) = unlock_step_channel.send(unlock_step) {
         eprintln!("The unlock step did not reach the page: {delivery_failure}");
     }
 }
 
-fn unlock_error_from_device_failure(device_failure: &DeviceError) -> DeviceUnlockError {
+pub(crate) fn unlock_error_from_device_failure(device_failure: &DeviceError) -> DeviceUnlockError {
     match device_failure {
         DeviceError::ConnectionFailed(_) | DeviceError::ConnectionClosed => {
             DeviceUnlockError::ConnectionLost
@@ -206,7 +209,8 @@ fn unlock_error_from_device_failure(device_failure: &DeviceError) -> DeviceUnloc
         DeviceError::RequestEncodingFailed(_)
         | DeviceError::MalformedMessage(_)
         | DeviceError::ReplyWithoutResult
-        | DeviceError::NotXbtFirmware { .. } => DeviceUnlockError::DeviceNotRecognized,
+        | DeviceError::NotXbtFirmware { .. }
+        | DeviceError::InvalidCustomPinServer(_) => DeviceUnlockError::DeviceNotRecognized,
     }
 }
 

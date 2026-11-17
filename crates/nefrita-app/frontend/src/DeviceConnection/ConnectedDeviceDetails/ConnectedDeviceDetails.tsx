@@ -3,6 +3,7 @@ import type { ConnectedDevice } from "../../bindings/ConnectedDevice";
 import type { ConnectedDeviceState } from "../../bindings/ConnectedDeviceState";
 import { searchBoardPorts } from "../../commands/boardPorts";
 import { DeviceUnlock } from "../DeviceUnlock";
+import { WalletSetup } from "../WalletSetup";
 
 export const portCheckIntervalMilliseconds = 2000;
 
@@ -27,7 +28,10 @@ export function ConnectedDeviceDetails({
   onUnplugged: () => void;
   onDeviceStateChange: (deviceState: ConnectedDeviceState) => void;
 }) {
-  const [unlockInProgress, setUnlockInProgress] = useState(false);
+  const [boardWaiting, setBoardWaiting] = useState(false);
+  const [sectionChangeMessage, setSectionChangeMessage] = useState<string | null>(null);
+  const withoutASavedWallet =
+    connectedDevice.deviceState === "uninitialized" || connectedDevice.deviceState === "unsaved";
 
   useEffect(() => {
     let portChecksStopped = false;
@@ -54,6 +58,18 @@ export function ConnectedDeviceDetails({
     return stopPortChecks;
   }, [connectedDevice.portName, onUnplugged]);
 
+  function changeDeviceState(deviceState: ConnectedDeviceState, newSectionChangeMessage?: string) {
+    setSectionChangeMessage(newSectionChangeMessage ?? null);
+    onDeviceStateChange(deviceState);
+  }
+
+  function changeBoardWaiting(boardWaitingNow: boolean) {
+    if (boardWaitingNow) {
+      setSectionChangeMessage(null);
+    }
+    setBoardWaiting(boardWaitingNow);
+  }
+
   return (
     <section>
       <h2>Connected board</h2>
@@ -67,12 +83,21 @@ export function ConnectedDeviceDetails({
         <dt>State</dt>
         <dd>{deviceStateLabels[connectedDevice.deviceState]}</dd>
       </dl>
-      <DeviceUnlock
-        deviceState={connectedDevice.deviceState}
-        onDeviceStateChange={onDeviceStateChange}
-        onUnlockingChange={setUnlockInProgress}
-      />
-      {!unlockInProgress && (
+      {sectionChangeMessage !== null && <p>{sectionChangeMessage}</p>}
+      {withoutASavedWallet ? (
+        <WalletSetup
+          deviceState={connectedDevice.deviceState}
+          onDeviceStateChange={changeDeviceState}
+          onBoardWaitingChange={changeBoardWaiting}
+        />
+      ) : (
+        <DeviceUnlock
+          deviceState={connectedDevice.deviceState}
+          onDeviceStateChange={changeDeviceState}
+          onUnlockingChange={changeBoardWaiting}
+        />
+      )}
+      {!boardWaiting && (
         <button type="button" onClick={onDisconnect}>
           Disconnect
         </button>
