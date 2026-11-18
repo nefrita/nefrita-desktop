@@ -3,6 +3,7 @@ mod socks_proxy;
 use std::env;
 use std::fs;
 use std::net::{SocketAddr, TcpStream};
+use std::slice;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -17,6 +18,10 @@ const LIBJADE_ADDRESS_VARIABLE: &str = "NEFRITA_LIBJADE_ADDRESS";
 const CUSTOM_PIN_SERVER_URL_VARIABLE: &str = "NEFRITA_CUSTOM_PIN_SERVER_URL";
 const CUSTOM_PIN_SERVER_PUBLIC_KEY_FILE_VARIABLE: &str =
     "NEFRITA_CUSTOM_PIN_SERVER_PUBLIC_KEY_FILE";
+const TLS_PIN_SERVER_URL_VARIABLE: &str = "NEFRITA_TLS_PIN_SERVER_URL";
+const TLS_PIN_SERVER_PUBLIC_KEY_FILE_VARIABLE: &str = "NEFRITA_TLS_PIN_SERVER_PUBLIC_KEY_FILE";
+const TLS_PIN_SERVER_ROOT_CERTIFICATE_FILE_VARIABLE: &str =
+    "NEFRITA_TLS_PIN_SERVER_ROOT_CERTIFICATE_FILE";
 const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
 const RETRY_INTERVAL: Duration = Duration::from_secs(1);
@@ -33,6 +38,7 @@ const DEFAULT_HTTP_PORT: u16 = 80;
 struct RecordingHttpPinServer {
     http_pin_server: HttpPinServer,
     offered_urls: Vec<String>,
+    offered_root_certificates: Vec<String>,
 }
 
 impl RecordingHttpPinServer {
@@ -40,6 +46,7 @@ impl RecordingHttpPinServer {
         Self {
             http_pin_server: HttpPinServer::direct(),
             offered_urls: Vec::new(),
+            offered_root_certificates: Vec::new(),
         }
     }
 
@@ -47,6 +54,7 @@ impl RecordingHttpPinServer {
         Self {
             http_pin_server: HttpPinServer::through_tor(tor_socks_proxy_address),
             offered_urls: Vec::new(),
+            offered_root_certificates: Vec::new(),
         }
     }
 }
@@ -58,6 +66,8 @@ impl PinServer for RecordingHttpPinServer {
     ) -> Result<PinServerPayload, PinServerError> {
         self.offered_urls
             .extend(pin_server_request.urls.iter().cloned());
+        self.offered_root_certificates
+            .extend(pin_server_request.root_certificates.iter().cloned());
         self.http_pin_server.exchange(pin_server_request)
     }
 }
@@ -96,13 +106,17 @@ fn required_custom_pin_server_url() -> String {
     required_environment_variable(CUSTOM_PIN_SERVER_URL_VARIABLE, "the custom PIN server")
 }
 
+fn required_file_bytes(variable_name: &str, file_description: &str) -> Vec<u8> {
+    let file_path = required_environment_variable(variable_name, file_description);
+    fs::read(&file_path)
+        .unwrap_or_else(|read_error| panic!("{file_path} should be readable: {read_error}"))
+}
+
 fn custom_pin_server_at(pin_server_url: &str) -> CustomPinServer {
-    let public_key_file = required_environment_variable(
+    let public_key_bytes = required_file_bytes(
         CUSTOM_PIN_SERVER_PUBLIC_KEY_FILE_VARIABLE,
         "the public key file of the custom PIN server",
     );
-    let public_key_bytes = fs::read(&public_key_file)
-        .unwrap_or_else(|read_error| panic!("{public_key_file} should be readable: {read_error}"));
     CustomPinServer {
         url: pin_server_url.to_owned(),
         onion_url: None,
@@ -117,6 +131,30 @@ fn custom_pin_server_with_test_onion_at(pin_server_url: &str) -> CustomPinServer
     CustomPinServer {
         onion_url: Some(format!("http://{TEST_ONION_HOST_NAME}")),
         ..custom_pin_server_at(pin_server_url)
+    }
+}
+
+fn tls_pin_server_root_certificate() -> String {
+    let root_certificate_bytes = required_file_bytes(
+        TLS_PIN_SERVER_ROOT_CERTIFICATE_FILE_VARIABLE,
+        "the root certificate file of the TLS PIN server",
+    );
+    String::from_utf8(root_certificate_bytes)
+        .expect("the root certificate file should hold PEM text")
+}
+
+fn tls_pin_server_with(root_certificate: &str) -> CustomPinServer {
+    let public_key_bytes = required_file_bytes(
+        TLS_PIN_SERVER_PUBLIC_KEY_FILE_VARIABLE,
+        "the public key file of the TLS PIN server",
+    );
+    CustomPinServer {
+        url: required_environment_variable(TLS_PIN_SERVER_URL_VARIABLE, "the TLS PIN server"),
+        onion_url: None,
+        public_key: public_key_bytes
+            .try_into()
+            .expect("the public key file should hold a compressed public key"),
+        certificate: Some(root_certificate.to_owned()),
     }
 }
 
@@ -227,6 +265,37 @@ fn pin_wallet_is_created_and_unlocked_with_the_custom_pin_server() {
             format!("{custom_pin_server_url}/set_pin"),
             format!("{custom_pin_server_url}/get_pin"),
         ]
+    );
+}
+
+#[test]
+#[ignore = "needs libjade_daemon built with XBT and the TLS PIN server of docs/custom-pin-server.md"]
+fn pin_wallet_is_created_and_unlocked_with_the_tls_pin_server() {
+    let root_certificate = tls_pin_server_root_certificate();
+    let tls_pin_server = tls_pin_server_with(&root_certificate);
+    HttpPinServer::direct()
+        .check_reachability(
+            slice::from_ref(&tls_pin_server.url),
+            slice::from_ref(&root_certificate),
+        )
+        .expect("the TLS PIN server should answer through TLS");
+    let mut device = connect_to_clean_libjade();
+    device
+        .set_custom_pin_server(&tls_pin_server)
+        .expect("libjade should accept the TLS PIN server with its root certificate");
+    let mut pin_server = RecordingHttpPinServer::direct();
+    create_pin_wallet(&mut device, &mut pin_server);
+    unlock_after_logout(&mut device, &mut pin_server);
+    assert_eq!(
+        pin_server.offered_urls,
+        [
+            format!("{}/set_pin", tls_pin_server.url),
+            format!("{}/get_pin", tls_pin_server.url),
+        ]
+    );
+    assert_eq!(
+        pin_server.offered_root_certificates,
+        [root_certificate.clone(), root_certificate]
     );
 }
 
