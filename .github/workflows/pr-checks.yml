@@ -189,6 +189,25 @@ jobs:
       DEVELOPMENT_PIN_SERVER_PORT: 8096
       CUSTOM_PIN_SERVER_PORT: 8097
       CUSTOM_PIN_SERVER_KEY_DIRECTORY: ${{ github.workspace }}/target/custom-pin-server
+      CUSTOM_PIN_SERVER_GUIDE: docs/custom-pin-server.md
+      GUIDE_BASH_BLOCKS_SCRIPT: .github/scripts/guide-bash-blocks.awk
+      GUIDE_STARTING_SECTIONS: |-
+        Prepare the shell
+        Build the PIN server image
+        Create the key pair of the PIN server
+        Create the certificate authority
+        Create the server certificate
+        Write the nginx TLS configuration
+        Start the PIN server
+        Load the PIN server in the app
+      GUIDE_RENEWAL_SECTIONS: |-
+        Prepare the shell
+        Create the server certificate
+        Renew the server certificate
+      GUIDE_CLOSING_SECTIONS: |-
+        Prepare the shell
+        Back up the PIN server
+        Stop and start the PIN server
     steps:
       - uses: actions/checkout@v7
 
@@ -273,6 +292,34 @@ jobs:
               --retry-all-errors "http://localhost:$pin_server_port/"
           done
 
+      - name: Check the custom PIN server guide and extract the sections that the job runs
+        run: |
+          grep --quiet --line-regexp "firmware_commit=$FIRMWARE_COMMIT" "$CUSTOM_PIN_SERVER_GUIDE"
+          awk -v list_sections_with_bash_blocks=1 -f "$GUIDE_BASH_BLOCKS_SCRIPT" \
+            "$CUSTOM_PIN_SERVER_GUIDE" | sort > "$RUNNER_TEMP/guide-sections-with-bash-blocks"
+          printf '%s\n' "$GUIDE_STARTING_SECTIONS" "$GUIDE_RENEWAL_SECTIONS" \
+            "$GUIDE_CLOSING_SECTIONS" | sort --unique > "$RUNNER_TEMP/guide-sections-that-run"
+          diff "$RUNNER_TEMP/guide-sections-with-bash-blocks" "$RUNNER_TEMP/guide-sections-that-run"
+          extract_guide_sections() {
+            GUIDE_SECTIONS="$1" awk -f "$GUIDE_BASH_BLOCKS_SCRIPT" "$CUSTOM_PIN_SERVER_GUIDE" > "$2"
+          }
+          extract_guide_sections "Prepare the shell" "$RUNNER_TEMP/guide-shell-preparation.sh"
+          extract_guide_sections "$GUIDE_STARTING_SECTIONS" "$RUNNER_TEMP/guide-starting-sections.sh"
+          extract_guide_sections "$GUIDE_RENEWAL_SECTIONS" "$RUNNER_TEMP/guide-renewal-sections.sh"
+          extract_guide_sections "$GUIDE_CLOSING_SECTIONS" "$RUNNER_TEMP/guide-closing-sections.sh"
+
+      - name: Start the TLS PIN server, following the custom PIN server guide
+        run: bash -e "$RUNNER_TEMP/guide-starting-sections.sh"
+
+      - name: Pass the URL and the files of the TLS PIN server to the integration tests
+        run: |
+          source "$RUNNER_TEMP/guide-shell-preparation.sh"
+          {
+            echo "NEFRITA_TLS_PIN_SERVER_URL=$pin_server_url"
+            echo "NEFRITA_TLS_PIN_SERVER_PUBLIC_KEY_FILE=$pin_server_key_pair_directory/server_public_key.pub"
+            echo "NEFRITA_TLS_PIN_SERVER_ROOT_CERTIFICATE_FILE=$certificate_authority_directory/certificate.pem"
+          } >> "$GITHUB_ENV"
+
       - name: Run the integration tests
         timeout-minutes: 10
         env:
@@ -282,6 +329,20 @@ jobs:
         run: |
           cargo test --package nefrita-device --test libjade --features debug-methods --locked \
             -- --ignored --test-threads=1
+
+      - name: Renew the server certificate of the TLS PIN server, following the guide
+        run: bash -e "$RUNNER_TEMP/guide-renewal-sections.sh"
+
+      - name: Run the test of the TLS PIN server with the renewed server certificate
+        timeout-minutes: 5
+        env:
+          NEFRITA_LIBJADE_ADDRESS: 127.0.0.1:${{ env.LIBJADE_PORT }}
+        run: |
+          cargo test --package nefrita-device --test libjade --features debug-methods --locked \
+            -- --ignored --exact pin_wallet_is_created_and_unlocked_with_the_tls_pin_server
+
+      - name: Back up, stop and start the TLS PIN server, following the guide
+        run: bash -e "$RUNNER_TEMP/guide-closing-sections.sh"
 
       - name: Show the libjade_daemon output
         if: failure()
@@ -294,3 +355,7 @@ jobs:
       - name: Show the custom PIN server output
         if: failure()
         run: docker logs custom-pin-server
+
+      - name: Show the TLS PIN server output
+        if: failure()
+        run: docker logs nefrita-pin-server
