@@ -188,9 +188,11 @@ This server keeps the PINs in memory (`--tmpfs /pins`): once it stops, a wallet 
 docker stop custom-pin-server
 ```
 
+To run a custom PIN server with TLS and keys of your own, follow [`docs/custom-pin-server.md`](docs/custom-pin-server.md).
+
 ## Integration tests
 
-The integration tests of `nefrita-device` talk to `libjade_daemon`, the Nefrita firmware compiled for a computer, built with XBT and listening on a TCP port. They also talk to two PIN servers: the development server, with the test key pair of the firmware repository, at `http://localhost:8096`, the address compiled into XBT development builds; and a custom server, with its own key pair, at `http://localhost:8097`.
+The integration tests of `nefrita-device` talk to `libjade_daemon`, the Nefrita firmware compiled for a computer, built with XBT and listening on a TCP port. They also talk to three PIN servers: the development server, with the test key pair of the firmware repository, at `http://localhost:8096`, the address compiled into XBT development builds; a custom server, with its own key pair, at `http://localhost:8097`; and the TLS PIN server of [`docs/custom-pin-server.md`](docs/custom-pin-server.md), with its own key pair and certificate authority, at `https://localhost:8443`.
 
 The tests use the debug methods of the device, so they need the `debug-methods` feature: plain `cargo test` does not build them, and `cargo test --all-features` lists them as ignored. To run them locally you need Docker; the firmware commit and the builder image are the same as in the `device-integration` job.
 
@@ -203,6 +205,9 @@ jade_builder_image="blockstream/jade_builder@sha256:$jade_builder_digest"
 firmware_directory="$PWD/target/firmware"
 custom_pin_server_key_directory="$PWD/target/custom-pin-server"
 custom_pin_server_public_key_file="$custom_pin_server_key_directory/server_public_key.pub"
+pin_server_directory="$HOME/nefrita-pin-server"
+tls_pin_server_public_key_file="$pin_server_directory/pin-server-key-pair/server_public_key.pub"
+tls_pin_server_root_certificate_file="$pin_server_directory/certificate-authority/certificate.pem"
 ```
 
 Prepare the firmware, `libjade_daemon`, the PIN server image and the key pair of the custom PIN server:
@@ -224,7 +229,9 @@ docker run --rm --platform linux/amd64 --volume "$custom_pin_server_key_director
   --workdir /keys --env PYTHONPATH=/ pin-server python3 -m pinserver.generateserverkey
 ```
 
-Then start the two PIN servers and `libjade_daemon`, run the tests and stop them:
+Start the TLS PIN server once, following `docs/custom-pin-server.md` from "Prepare the shell" to "Start the PIN server" with the values of its "Prepare the shell", whose `pin_server_directory` is the one above. Docker starts it again whenever Docker starts, so later runs only need it running. `pin_server_directory` and the URL `https://localhost:8443` of the next block are values of that "Prepare the shell": when the guide changes them, update them here too.
+
+Then start the two other PIN servers and `libjade_daemon`, run the tests and stop them:
 
 ```bash
 docker run --rm --detach --name development-pin-server --platform linux/amd64 \
@@ -245,6 +252,9 @@ done
 NEFRITA_LIBJADE_ADDRESS=127.0.0.1:30121 \
 NEFRITA_CUSTOM_PIN_SERVER_URL=http://localhost:8097 \
 NEFRITA_CUSTOM_PIN_SERVER_PUBLIC_KEY_FILE="$custom_pin_server_public_key_file" \
+NEFRITA_TLS_PIN_SERVER_URL=https://localhost:8443 \
+NEFRITA_TLS_PIN_SERVER_PUBLIC_KEY_FILE="$tls_pin_server_public_key_file" \
+NEFRITA_TLS_PIN_SERVER_ROOT_CERTIFICATE_FILE="$tls_pin_server_root_certificate_file" \
   cargo test --package nefrita-device --test libjade --features debug-methods --locked \
   -- --ignored --test-threads=1
 docker stop libjade-daemon development-pin-server custom-pin-server
@@ -252,9 +262,9 @@ docker stop libjade-daemon development-pin-server custom-pin-server
 
 The firmware and the key pair of the custom PIN server stay inside `target/`, which git ignores and `cargo clean` deletes. Run the preparation once, again after `cargo clean`, and again when the workflow changes `FIRMWARE_COMMIT`, after updating `firmware_commit` here. Building libjade takes several minutes, and longer on Apple silicon, where Docker emulates `linux/amd64`; while `target/firmware/build_linux/libjade/libjade_daemon` is built for the current commit, the `docker run` that builds it can be left out. `generateserverkey` keeps a key pair that already exists.
 
-The PIN servers keep the PINs in memory (`--tmpfs /pins`), so every run starts empty. If the `local-pinserver` of the firmware guide is already running on port 8096, it works as the development PIN server: skip the `docker run` of `development-pin-server` and leave it out of `docker stop`. The tests wait up to two minutes for `libjade_daemon` to answer.
+The development and custom PIN servers keep the PINs in memory (`--tmpfs /pins`), so every run starts empty; the TLS PIN server keeps them in its volume. If the `local-pinserver` of the firmware guide is already running on port 8096, it works as the development PIN server: skip the `docker run` of `development-pin-server` and leave it out of `docker stop`. The tests wait up to two minutes for `libjade_daemon` to answer.
 
-If a test fails, `docker logs` with the name of a container (`libjade-daemon`, `development-pin-server` or `custom-pin-server`) shows its output. Run it before `docker stop`, which removes the containers.
+If a test fails, `docker logs` with the name of a container (`libjade-daemon`, `development-pin-server`, `custom-pin-server` or `nefrita-pin-server`, the TLS PIN server) shows its output. Run it before `docker stop`, which removes the first three.
 
 ## Manual tests with a board
 
@@ -380,6 +390,6 @@ rm -rf "$HOME/.nefrita-tor-test"
 
 ## Continuous integration
 
-`PR checks` (`.github/workflows/pr-checks.yml`) runs on every pull request to `main`, and on demand with "Run workflow". It has one job for the frontend checks above, tests included, `frontend`; one job per Rust check, `format`, `lint`, `test`, `app-build` and `dependencies`; and `device-integration` for the integration tests. `frontend` and `app-build` install Node in the version of `package.json` with `actions/setup-node`, and pnpm with npm, in the version of `packageManager`. On Linux, `lint`, `test` and `app-build` first install `libwebkit2gtk-4.1-dev`, without its recommended packages. After its tests, `test` fails if they changed the TypeScript types in `frontend/src/bindings`, that is, if the types in the repository are not the ones Rust generates. `app-build` builds the frontend and compiles the app in release mode on Linux x86_64, macOS ARM64 and Windows x86_64, one job per system, and a failure on one system does not cancel the others; it sets `AWS_LC_SYS_PREBUILT_NASM`, so that on Windows aws-lc-sys uses its prebuilt NASM objects. `device-integration` builds `libjade_daemon` with XBT and the PIN server image from the firmware commit in `FIRMWARE_COMMIT`, caches both per commit, generates a new key pair for the custom PIN server on every run, and runs the integration tests against `libjade_daemon` and the two PIN servers. If it fails, the job shows the output of `libjade_daemon` and of each PIN server.
+`PR checks` (`.github/workflows/pr-checks.yml`) runs on every pull request to `main`, and on demand with "Run workflow". It has one job for the frontend checks above, tests included, `frontend`; one job per Rust check, `format`, `lint`, `test`, `app-build` and `dependencies`; and `device-integration` for the integration tests. `frontend` and `app-build` install Node in the version of `package.json` with `actions/setup-node`, and pnpm with npm, in the version of `packageManager`. On Linux, `lint`, `test` and `app-build` first install `libwebkit2gtk-4.1-dev`, without its recommended packages. After its tests, `test` fails if they changed the TypeScript types in `frontend/src/bindings`, that is, if the types in the repository are not the ones Rust generates. `app-build` builds the frontend and compiles the app in release mode on Linux x86_64, macOS ARM64 and Windows x86_64, one job per system, and a failure on one system does not cancel the others; it sets `AWS_LC_SYS_PREBUILT_NASM`, so that on Windows aws-lc-sys uses its prebuilt NASM objects. `device-integration` builds `libjade_daemon` with XBT and the PIN server image from the firmware commit in `FIRMWARE_COMMIT`, caches both per commit, and generates a new key pair for the custom PIN server on every run. It follows `docs/custom-pin-server.md` as written: it checks that the guide uses the commit of `FIRMWARE_COMMIT` and that the job runs every section of the guide with `bash` blocks, extracts those blocks with `.github/scripts/guide-bash-blocks.awk`, and runs them to start the TLS PIN server. Then it runs the integration tests against `libjade_daemon` and the three PIN servers, renews the server certificate of the guide and runs the test of the TLS PIN server again, and backs up, stops and starts the TLS PIN server. Every section of the guide with `bash` blocks has to be in one of the section lists of the job, `GUIDE_STARTING_SECTIONS`, `GUIDE_RENEWAL_SECTIONS` or `GUIDE_CLOSING_SECTIONS`, and every code block of the guide has to be `bash`, which the job runs, or `text`, which it does not; otherwise the job fails. If it fails, the job shows the output of `libjade_daemon` and of each PIN server.
 
 The workflow only uses actions created by GitHub, and its token can only read the repository; `device-integration` logs in to Docker Hub with the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets to pull the builder image and the Debian base image of the PIN server.
